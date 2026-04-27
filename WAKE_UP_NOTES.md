@@ -116,13 +116,34 @@ find apps/web/src -name '*.jsx' -o -name '*.js' | xargs wc -l | tail -1   # ~700
 
 ## My recommendation for Day 1 morning
 
+### Step 0 — try demo mode first (works without any creds)
+
+Demo mode streams canned-but-realistic agent traces so you can see the UI working immediately:
+
+```bash
+# ensure .env has SHERLOCK_DEMO_MODE=1 (or export it)
+SHERLOCK_DEMO_MODE=1 ./scripts/start_dev.sh
+```
+
+Open http://localhost:5173 and try any of these (they're prompts in the welcome screen):
+
+- *How do I label a white tape device?* → Discovery answer with file:line citations
+- *What does feature_configuration.cross_customer_mesh_allowed do?* → flag explanation
+- *Where is the lime selection algorithm implemented?* → ingress-service file pointer
+- *Device AABBCCDDEEFF events not in lookup_parcels in PPE* → full RCA with timeline, evidence files, Mermaid service-hop diagram, structured remediation
+
+This bypasses Anthropic/OpenAI/PPE entirely. Useful for screenshots, mobile testing, and confirming the UI works.
+
+### Step 1+ — go live
+
 1. Open this file. (You're here.)
-2. Verify the test suite still passes: `uv run pytest`
-3. Fill in `.env`
-4. Run the indexer: `uv run python -m indexer.run` (smoke first via `--limit 50`, then full)
-5. `./scripts/start_dev.sh` and try a Discovery query in the browser
-6. If Discovery works, try an RCA query against a real PPE device you know the answer to
-7. Iterate the system prompt (`apps/api/prompts/rca_system.md`) if the agent's reasoning needs nudging
-8. Then move on to demo prep — DEMO.md script + recording
+2. Verify the test suite still passes: `uv run pytest` (expect 86/86)
+3. Fill in `.env` with real keys
+4. Set `SHERLOCK_DEMO_MODE=0` in `.env`
+5. Run the indexer: `uv run python -m indexer.run` (smoke first via `--limit 50`, then full)
+6. `./scripts/start_dev.sh` and try a Discovery query in the browser
+7. If Discovery works, try an RCA query against a real PPE device you know the answer to
+8. Iterate the system prompt (`apps/api/prompts/rca_system.md`) if the agent's reasoning needs nudging
+9. Then move on to demo prep — DEMO.md script + recording
 
 Good morning. ☕

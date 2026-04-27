@@ -40,17 +40,24 @@ async def _dispatch(req: ChatRequest):
     routed = classify(req.message)
     yield sse("router", {"intent": routed.intent, "entities": routed.entities})
 
+    # Demo mode short-circuits to canned responses so the UI works even without
+    # any external credentials. Set SHERLOCK_DEMO_MODE=1 in .env to enable.
+    from apps.api import demo
+    if demo.is_active():
+        async for evt in demo.run_demo(req.message, entities=routed.entities):
+            yield evt
+        return
+
     if routed.intent == "API_DISCOVERY":
         async for evt in run_discovery(req.message):
             yield evt
         return
 
     if routed.intent == "DEBUGGING":
-        # RCA agent lands Day 3 — until then, surface a clear message.
         try:
             from apps.api.agents.rca import run_rca
         except ImportError:
-            yield sse("status", {"phase": "rca-not-yet", "msg": "RCA agent ships Day 3."})
+            yield sse("status", {"phase": "rca-not-yet", "msg": "RCA agent module not available."})
             yield sse("done", {})
             return
         async for evt in run_rca(req.message, entities=routed.entities):

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     sherlock_investigations_dir: Path = Path("./investigations")
     sherlock_repos_dir: Path = Path("./repos")
     sherlock_db_path: Path = Path("./sherlock.db")
+    sherlock_demo_mode: bool = False
 
 
 _settings: Settings | None = None

@@ -155,10 +155,25 @@ For mobile / live demo, in another terminal:
 ### Test
 
 ```bash
-uv run pytest                          # 77 tests, ~1 sec
+uv run pytest                          # 86 tests, ~10 sec
 uv run pytest tests/test_indexer_*.py  # indexer-only
 uv run pytest -m regression            # known-answer end-to-end (requires PPE creds)
 ```
+
+### Demo mode (no creds required)
+
+To see Sherlock work without setting up Anthropic/OpenAI/PPE:
+
+```bash
+echo 'SHERLOCK_DEMO_MODE=1' >> .env
+./scripts/start_dev.sh
+# open http://localhost:5173
+```
+
+Demo mode streams canned-but-realistic agent traces for marquee queries
+(see [`WAKE_UP_NOTES.md`](./WAKE_UP_NOTES.md)). Useful for the live demo
+or for screenshots; turn it off (`SHERLOCK_DEMO_MODE=0`) for real
+investigations.
 
 ---
 
