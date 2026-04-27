@@ -26,6 +26,14 @@ desktop browser.
 🚧 Under active development. Submission deadline: **April 30, 2026 EOD**.
 Town Hall demo: **May 2026** (top-5 finalists, 5-min live demo).
 
+The full implementation plan (5 days, task-by-task with code) lives in the
+author's Obsidian work vault at
+`~/plans/work/designs/rca-tool/implementation/`. Companion specs:
+`sherlock-design.md` (architecture), `2026-04-25-brainstorm-log.md`
+(decision log), `autonomous-execution-log.md` (overnight build log).
+
+If you're picking this up cold, read [`WAKE_UP_NOTES.md`](./WAKE_UP_NOTES.md) first.
+
 ---
 
 ## Architecture
@@ -93,43 +101,63 @@ sherlock/
 
 ## Setup
 
-> The setup steps below will be filled in as the implementation lands.
-> For now this section documents what *will* be required.
-
 ### Prerequisites
 
 - macOS or Linux
-- Python 3.12+
-- Node 20+
-- Docker (for local Postgres)
+- Python 3.12+ (3.13 verified) and `uv`
+- Node 20+ (22 verified)
+- Docker Desktop (for local Postgres + pgvector)
 - `kubectl` configured against the Trackonomy PPE AKS cluster
 - Read access to PPE: MSSQL (`dbtrkmtppe2`), Cosmos, Redis, Datadog
 - API keys: Anthropic, OpenAI
 
-### Environment variables
+### One-time setup
 
-Copy `.env.example` to `.env` and fill in the values. **Never commit `.env`.**
+```bash
+# 1. install Python deps
+uv sync
 
+# 2. install JS deps
+( cd apps/web && npm install )
+
+# 3. fill in your secrets
+cp .env.example .env
+$EDITOR .env
+
+# 4. start Postgres + pgvector
+docker compose up -d
+
+# 5. deploy the pgvector schema (idempotent)
+uv run python -m indexer.db
+
+# 6. point the indexer at the 5 source repos (symlinks existing clones)
+./scripts/clone_corpus.sh
+
+# 7. build the corpus (~10 min, ~$1.20 in OpenAI embeddings)
+uv run python -m indexer.run
 ```
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-MSSQL_PPE_CONN=
-COSMOS_PPE_KEY=
-COSMOS_PPE_ENDPOINT=
-REDIS_PPE_URL=
-DATADOG_API_KEY=
-DATADOG_APP_KEY=
-KUBECONFIG=
-DATABASE_URL=             # local Postgres for pgvector
+
+### Run
+
+```bash
+# one command — Postgres + FastAPI + Vite all in the foreground:
+./scripts/start_dev.sh
+
+# open http://localhost:5173
 ```
 
-### Run (planned)
+For mobile / live demo, in another terminal:
 
+```bash
+./scripts/start_tunnel.sh   # cloudflared free tier, prints a public *.trycloudflare.com URL
 ```
-docker compose up -d            # local Postgres
-python -m indexer.run           # populate pgvector corpus (~10 min, ~$1.20)
-uvicorn apps.api.main:app       # backend
-cd apps/web && npm run dev      # frontend
+
+### Test
+
+```bash
+uv run pytest                          # 77 tests, ~1 sec
+uv run pytest tests/test_indexer_*.py  # indexer-only
+uv run pytest -m regression            # known-answer end-to-end (requires PPE creds)
 ```
 
 ---

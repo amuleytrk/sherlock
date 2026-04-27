@@ -24,6 +24,7 @@ from anthropic import Anthropic
 
 from apps.api.agents.code_exec import run_code_exec_against_scratch
 from apps.api.agents.scratch import Investigation
+from apps.api.audit import TimedTool
 from apps.api.settings import get_settings
 from apps.api.sse import sse
 
@@ -422,34 +423,35 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
 
             t0 = time.monotonic()
             try:
-                if block.name == "code_exec":
-                    code_result = run_code_exec_against_scratch(inv, block.input["code"])
-                    files_str = "\n".join(str(p) for p in code_result["produced_files"])
-                    out_text = (
-                        f"stdout:\n{code_result['stdout']}\n\n"
-                        f"stderr:\n{code_result['stderr']}\n\n"
-                        f"produced files:\n{files_str}"
-                    )
-                elif block.name == "write_final_rca":
-                    inv.write_final_rca(block.input["markdown"])
-                    out_text = f"final-rca.md written ({len(block.input['markdown'])} chars)"
-                    final_rca_written = True
-                elif block.name == "Task":
-                    if subagents_dispatched >= MAX_SUBAGENTS:
-                        out_text = f"max sub-agents ({MAX_SUBAGENTS}) reached; do not call Task again"
-                    else:
-                        subagents_dispatched += 1
-                        out_text = await _run_subagent(
-                            client=client,
-                            sys_prompt=sys_prompt,
-                            inv=inv,
-                            branch_name=block.input["branch_name"],
-                            instructions=block.input["instructions"],
+                with TimedTool(session_id=None, rca_id=inv.rca_id, tool_name=block.name, args=block.input):
+                    if block.name == "code_exec":
+                        code_result = run_code_exec_against_scratch(inv, block.input["code"])
+                        files_str = "\n".join(str(p) for p in code_result["produced_files"])
+                        out_text = (
+                            f"stdout:\n{code_result['stdout']}\n\n"
+                            f"stderr:\n{code_result['stderr']}\n\n"
+                            f"produced files:\n{files_str}"
                         )
-                else:
-                    out_text = await _call_mcp_tool(block.name, block.input)
-                    ext = "json" if out_text.lstrip().startswith(("[", "{")) else "txt"
-                    inv.write_evidence(name=block.name, ext=ext, content=out_text)
+                    elif block.name == "write_final_rca":
+                        inv.write_final_rca(block.input["markdown"])
+                        out_text = f"final-rca.md written ({len(block.input['markdown'])} chars)"
+                        final_rca_written = True
+                    elif block.name == "Task":
+                        if subagents_dispatched >= MAX_SUBAGENTS:
+                            out_text = f"max sub-agents ({MAX_SUBAGENTS}) reached; do not call Task again"
+                        else:
+                            subagents_dispatched += 1
+                            out_text = await _run_subagent(
+                                client=client,
+                                sys_prompt=sys_prompt,
+                                inv=inv,
+                                branch_name=block.input["branch_name"],
+                                instructions=block.input["instructions"],
+                            )
+                    else:
+                        out_text = await _call_mcp_tool(block.name, block.input)
+                        ext = "json" if out_text.lstrip().startswith(("[", "{")) else "txt"
+                        inv.write_evidence(name=block.name, ext=ext, content=out_text)
             except Exception as e:
                 out_text = f"tool error: {type(e).__name__}: {e}"
             duration_ms = int((time.monotonic() - t0) * 1000)
