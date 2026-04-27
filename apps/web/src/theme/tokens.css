@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;600&display=swap');
+
+:root {
+  --bg:           #0b1326;
+  --surface:      #131b2e;
+  --surface-2:    #171f33;
+  --surface-3:    #222a3d;
+  --ink:          #dae2fd;
+  --ink-dim:      #bec8d2;
+  --ink-muted:    #88929b;
+  --outline:      rgba(136, 146, 155, 0.20);
+  --outline-soft: rgba(62, 72, 80, 0.32);
+
+  --primary:      #89ceff;
+  --primary-fg:   #00344d;
+  --success:      #4fdbc8;
+  --warn:         #ffb95f;
+  --danger:       #ffb4ab;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-tech { font-family: 'Space Grotesk', ui-monospace, monospace; }
+
+.label-caps {
+  font-family: 'Space Grotesk', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.glass {
+  background: rgba(19, 27, 46, 0.7);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+}
+
+/* Typography scale (Technical Precision) */
+h1 { font-size: 32px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+h2 { font-size: 24px; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; }
+h3 { font-size: 18px; font-weight: 500; line-height: 1.4; }
+
+/* Subtle pulse for live status dots */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
+
+/* Markdown prose tweaks for the dark theme */
+.prose-invert {
+  color: var(--ink);
+}
+.prose-invert a { color: var(--primary); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.prose-invert code { background: var(--surface-3); padding: 1px 4px; border-radius: 3px; font-family: 'Space Grotesk', monospace; font-size: 0.92em; color: var(--ink); }
+.prose-invert pre { background: var(--surface-2); border: 1px solid var(--outline-soft); border-radius: 6px; padding: 12px; overflow-x: auto; }
+.prose-invert pre code { background: transparent; padding: 0; }
+.prose-invert h1, .prose-invert h2, .prose-invert h3 { color: var(--ink); margin-top: 1em; margin-bottom: 0.4em; }
+.prose-invert ul, .prose-invert ol { margin: 0.5em 0; padding-left: 1.5em; }
+.prose-invert li { margin: 0.25em 0; }
+.prose-invert table { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 13px; }
+.prose-invert th, .prose-invert td { border: 1px solid var(--outline-soft); padding: 6px 10px; text-align: left; }
+.prose-invert th { background: var(--surface-2); color: var(--ink-muted); font-weight: 600; }
+.prose-invert blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--ink-dim); margin: 0.5em 0; }
