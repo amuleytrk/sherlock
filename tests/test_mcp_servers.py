@@ -107,3 +107,69 @@ async def test_redis_missing_param_for_pattern():
     out = await call_tool("redis_get", {"key_type": "idict", "params": {}})
     txt = out[0].text
     assert "missing param" in txt or "not configured" in txt
+
+
+def test_redis_client_builds_from_host_triplet(monkeypatch):
+    """Host + port + key should produce a Redis client without needing a URL."""
+    class _FakeSettings:
+        redis_ppe_url = ""
+        redis_ppe_host = "ppe-redis.example.com"
+        redis_ppe_port = 6380
+        redis_ppe_key = "fake-key"
+        redis_ppe_tls = True
+
+    monkeypatch.setattr("mcp_servers.trk_redis.server.get_settings", lambda: _FakeSettings())
+    from mcp_servers.trk_redis.server import _client
+    client = _client()
+    # Client constructed without raising = test passes; check the connection
+    # parameters rather than connecting.
+    pool = client.connection_pool
+    assert pool.connection_kwargs["host"] == "ppe-redis.example.com"
+    assert pool.connection_kwargs["port"] == 6380
+    assert pool.connection_kwargs["password"] == "fake-key"
+
+
+def test_redis_client_builds_from_url(monkeypatch):
+    """REDIS_PPE_URL should still work for users who already have a URL form."""
+    class _FakeSettings:
+        redis_ppe_url = "rediss://:secret@host.example.com:6380"
+        redis_ppe_host = ""
+        redis_ppe_port = 6380
+        redis_ppe_key = ""
+        redis_ppe_tls = True
+
+    monkeypatch.setattr("mcp_servers.trk_redis.server.get_settings", lambda: _FakeSettings())
+    from mcp_servers.trk_redis.server import _client
+    client = _client()
+    assert client is not None
+
+
+def test_redis_client_raises_with_no_config(monkeypatch):
+    class _FakeSettings:
+        redis_ppe_url = ""
+        redis_ppe_host = ""
+        redis_ppe_port = 6380
+        redis_ppe_key = ""
+        redis_ppe_tls = True
+
+    monkeypatch.setattr("mcp_servers.trk_redis.server.get_settings", lambda: _FakeSettings())
+    from mcp_servers.trk_redis.server import _client
+    with pytest.raises(RuntimeError, match="Redis not configured"):
+        _client()
+
+
+def test_redis_triplet_takes_precedence_over_url(monkeypatch):
+    """If both URL and triplet are set, triplet wins (clearer & avoids URL-encoding)."""
+    class _FakeSettings:
+        redis_ppe_url = "rediss://:other-key@other-host:9999"
+        redis_ppe_host = "preferred-host.example.com"
+        redis_ppe_port = 6380
+        redis_ppe_key = "preferred-key"
+        redis_ppe_tls = True
+
+    monkeypatch.setattr("mcp_servers.trk_redis.server.get_settings", lambda: _FakeSettings())
+    from mcp_servers.trk_redis.server import _client
+    client = _client()
+    pool = client.connection_pool
+    assert pool.connection_kwargs["host"] == "preferred-host.example.com"
+    assert pool.connection_kwargs["password"] == "preferred-key"

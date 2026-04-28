@@ -34,8 +34,14 @@ class Settings(BaseSettings):
     cosmos_ppe_key: str = ""
     cosmos_ppe_database: str = ""
 
-    # Redis
+    # Redis — accept either a single URL or host/port/key triplet (Trackonomy
+    # services pass these separately and use TLS via rediss://). If host is
+    # set, we build the connection from the triplet; otherwise we use the URL.
     redis_ppe_url: str = ""
+    redis_ppe_host: str = ""
+    redis_ppe_port: int = 6380
+    redis_ppe_key: str = ""
+    redis_ppe_tls: bool = True
 
     # Datadog
     datadog_api_key: str = ""

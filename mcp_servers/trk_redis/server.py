@@ -56,8 +56,33 @@ KEY_PATTERNS: dict[str, dict] = {
 
 
 def _client():
+    """Build a read-side Redis client.
+
+    Two configuration shapes are accepted:
+    1. `REDIS_PPE_HOST` + `REDIS_PPE_PORT` + `REDIS_PPE_KEY` (preferred — matches
+       how Trackonomy backend services configure Redis; avoids URL-encoding
+       headaches with passwords that contain `+`, `/`, `=`).
+    2. `REDIS_PPE_URL` (single connection string, e.g. `rediss://:KEY@host:port`).
+
+    If both are set, the host/port/key triplet wins.
+    """
     s = get_settings()
-    return redis.from_url(s.redis_ppe_url, decode_responses=True)
+    if s.redis_ppe_host and s.redis_ppe_key:
+        return redis.Redis(
+            host=s.redis_ppe_host,
+            port=s.redis_ppe_port,
+            password=s.redis_ppe_key,
+            ssl=s.redis_ppe_tls,
+            decode_responses=True,
+            socket_timeout=5,
+            socket_connect_timeout=5,
+        )
+    if s.redis_ppe_url:
+        return redis.from_url(s.redis_ppe_url, decode_responses=True)
+    raise RuntimeError(
+        "Redis not configured: set either REDIS_PPE_HOST + REDIS_PPE_PORT + "
+        "REDIS_PPE_KEY (preferred), or REDIS_PPE_URL"
+    )
 
 
 @server.list_tools()
@@ -99,8 +124,11 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text=f"unknown tool: {name}")]
 
     s = get_settings()
-    if not s.redis_ppe_url:
-        return [TextContent(type="text", text="redis not configured (missing REDIS_PPE_URL)")]
+    if not (s.redis_ppe_url or (s.redis_ppe_host and s.redis_ppe_key)):
+        return [TextContent(
+            type="text",
+            text="redis not configured (set REDIS_PPE_HOST + REDIS_PPE_PORT + REDIS_PPE_KEY, or REDIS_PPE_URL)"
+        )]
 
     kt = arguments.get("key_type")
     if kt not in KEY_PATTERNS:
