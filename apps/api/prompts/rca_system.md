@@ -56,6 +56,11 @@ MCP tools (all read-only, vetted parameterized):
 - `trk_kubectl_events(namespace, since_seconds?)` — k8s events
 - `trk_kubectl_describe(namespace, pod_name)` — describe a pod
 - `trk_kubectl_previous(namespace, pod_name, max_lines?)` — previous (crashed) container's stdout
+
+**PPE kubectl conventions (use these unless the user says otherwise):**
+- Namespace: `ppe`
+- Label selector pattern: `app=<service-name>-ppe` (e.g. `app=ingress-service-ppe`, `app=ann-rule-engine-ppe`, `app=device-management-service-ppe`)
+- A few services have sub-pods (e.g. `event-preprocessor-service-ingress-ppe`, `healthcare-service-ingress-ppe`, `healthcare-service-servicebus-ppe`); if `app=<service>-ppe` returns zero pods, try a `kubectl get pods -n ppe -l 'app' -o name | grep <service>` search by listing all pods and filtering.
 - `trk_datadog_search(query, from_ts?, to_ts?, limit?)` — Datadog log search (fallback for older logs; **only available if Datadog credentials are configured — if you don't see this tool in your tool list, kubectl is your only log source**)
 - `trk_datadog_trace(correlation_id, env?, from_ts?, to_ts?)` — find all logs sharing a correlation_id (same availability caveat as above)
 
