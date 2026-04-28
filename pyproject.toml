@@ -36,6 +36,7 @@ dependencies = [
     "pymssql>=2.3.1",
     "azure-cosmos>=4.7.0",
     "redis>=5.2.0",
+    "certifi>=2024.7.4",  # CA bundle for Redis TLS on macOS
     "kubernetes>=31.0.0",
     "datadog-api-client>=2.31.0",
     "httpx>=0.27.2",

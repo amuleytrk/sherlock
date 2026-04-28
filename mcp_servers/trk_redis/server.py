@@ -65,19 +65,34 @@ def _client():
     2. `REDIS_PPE_URL` (single connection string, e.g. `rediss://:KEY@host:port`).
 
     If both are set, the host/port/key triplet wins.
+
+    SSL: we explicitly point at `certifi`'s CA bundle. Python on macOS often
+    can't find the system trust store, so `redis.Redis(ssl=True)` alone fails
+    with "unable to get local issuer certificate" against Azure Redis.
     """
+    import certifi
     s = get_settings()
     if s.redis_ppe_host and s.redis_ppe_key:
-        return redis.Redis(
-            host=s.redis_ppe_host,
-            port=s.redis_ppe_port,
-            password=s.redis_ppe_key,
-            ssl=s.redis_ppe_tls,
-            decode_responses=True,
-            socket_timeout=5,
-            socket_connect_timeout=5,
-        )
+        kwargs = {
+            "host": s.redis_ppe_host,
+            "port": s.redis_ppe_port,
+            "password": s.redis_ppe_key,
+            "decode_responses": True,
+            "socket_timeout": 5,
+            "socket_connect_timeout": 5,
+        }
+        if s.redis_ppe_tls:
+            kwargs["ssl"] = True
+            kwargs["ssl_ca_certs"] = certifi.where()
+        return redis.Redis(**kwargs)
     if s.redis_ppe_url:
+        # Same CA bundle path for URL-form connections that use rediss://.
+        if s.redis_ppe_url.startswith("rediss://"):
+            return redis.from_url(
+                s.redis_ppe_url,
+                decode_responses=True,
+                ssl_ca_certs=certifi.where(),
+            )
         return redis.from_url(s.redis_ppe_url, decode_responses=True)
     raise RuntimeError(
         "Redis not configured: set either REDIS_PPE_HOST + REDIS_PPE_PORT + "
