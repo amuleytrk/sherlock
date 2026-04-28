@@ -26,9 +26,12 @@ def test_demo_rca_events_not_in_lookup_matches():
     assert demo.is_demo_query("not appearing in lookup_parcels") == "rca_events_not_in_lookup"
 
 
-def test_demo_rca_ingress_500_matches():
-    assert demo.is_demo_query("ingress-service is throwing 500") == "rca_ingress_500"
-    assert demo.is_demo_query("Why is ingress 500-ing?") == "rca_ingress_500"
+def test_demo_rca_ingress_500_no_longer_matches():
+    """The rca_ingress_500 matcher was removed because no distinct canned
+    scenario existed for it — the old code silently fell back to the
+    lookup_parcels RCA, which would've been misleading at demo time."""
+    assert demo.is_demo_query("ingress-service is throwing 500") is None
+    assert demo.is_demo_query("Why is ingress 500-ing?") is None
 
 
 def test_demo_unrecognized_returns_none():

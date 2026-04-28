@@ -1,9 +1,9 @@
 """Sherlock FastAPI app — entry point for the web UI.
 
-Routes mounted here:
+Routes:
     GET  /health                  — liveness probe
     POST /chat                    — SSE-streamed agent trace for a user message
-    GET  /sessions                — list past sessions (Day 5 wires real persistence)
+    GET  /sessions                — list past sessions (newest first, max 50)
     GET  /rca/{rca_id}            — fetch a synthesized RCA artifact + analysis files
     GET  /rca/{rca_id}/audit      — fetch tool-call audit log for an RCA
     GET  /artifacts?path=...      — serve a file from the investigations dir (path-confined)
@@ -17,7 +17,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from apps.api import audit, demo, store
 from apps.api.agents.discovery import run_discovery
+from apps.api.agents.rca import run_rca
 from apps.api.router import classify
 from apps.api.settings import get_settings
 from apps.api.sse import sse
@@ -28,7 +30,7 @@ app = FastAPI(title="Sherlock", version="0.1.0")
 @app.get("/health")
 def health() -> dict:
     s = get_settings()
-    return {"status": "ok", "release": s.sherlock_release}
+    return {"status": "ok", "release": s.sherlock_release, "demo_mode": s.sherlock_demo_mode}
 
 
 class ChatRequest(BaseModel):
@@ -42,7 +44,6 @@ async def _dispatch(req: ChatRequest):
 
     # Demo mode short-circuits to canned responses so the UI works even without
     # any external credentials. Set SHERLOCK_DEMO_MODE=1 in .env to enable.
-    from apps.api import demo
     if demo.is_active():
         async for evt in demo.run_demo(req.message, entities=routed.entities):
             yield evt
@@ -54,12 +55,6 @@ async def _dispatch(req: ChatRequest):
         return
 
     if routed.intent == "DEBUGGING":
-        try:
-            from apps.api.agents.rca import run_rca
-        except ImportError:
-            yield sse("status", {"phase": "rca-not-yet", "msg": "RCA agent module not available."})
-            yield sse("done", {})
-            return
         async for evt in run_rca(req.message, entities=routed.entities):
             yield evt
         return
@@ -84,21 +79,23 @@ async def chat(req: ChatRequest):
 
 @app.get("/sessions")
 def list_sessions_endpoint():
-    """Return the last 50 sessions. Day 5 wires the SQLite store; for now we
-    return an empty list so the sidebar renders cleanly without errors."""
-    try:
-        from apps.api.store import list_sessions  # noqa: F401  — Day 5
-        return {"sessions": list_sessions(limit=50)}
-    except ImportError:
-        return {"sessions": []}
+    """Return the last 50 sessions, newest first."""
+    return {"sessions": store.list_sessions(limit=50)}
 
 
 def _resolve_artifact_path(path: str) -> Path:
     """Resolve a user-supplied path against the investigations dir, refusing
-    paths that escape the root (path-traversal guard)."""
+    paths that escape the root (path-traversal guard).
+
+    Absolute paths are rejected outright — clients should always pass relative
+    paths returned by /rca/{rca_id} (which are always relative to the
+    investigations dir).
+    """
+    if Path(path).is_absolute():
+        raise HTTPException(status_code=400, detail="absolute paths are not accepted")
     s = get_settings()
     root = s.sherlock_investigations_dir.resolve()
-    target = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    target = (root / path).resolve()
     try:
         target.relative_to(root)
     except ValueError as e:
@@ -149,9 +146,5 @@ def get_rca(rca_id: str):
 
 @app.get("/rca/{rca_id}/audit")
 def get_audit_endpoint(rca_id: str):
-    """Audit log for an RCA. Day 5 wires the SQLite store."""
-    try:
-        from apps.api.audit import list_for_rca  # noqa: F401  — Day 5
-        return {"entries": list_for_rca(rca_id)}
-    except ImportError:
-        return {"entries": []}
+    """Tool-call audit log for an RCA, oldest first."""
+    return {"entries": audit.list_for_rca(rca_id)}

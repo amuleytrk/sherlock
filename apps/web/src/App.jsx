@@ -6,7 +6,6 @@ import EnvSwitcher from "./components/EnvSwitcher.jsx";
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeSession, setActiveSession] = useState(null);
-  const [env, setEnv] = useState("ppe");
 
   return (
     <div className="h-screen w-screen flex flex-col">
@@ -23,7 +22,7 @@ export default function App() {
         </button>
         <h1 className="text-[18px] font-semibold tracking-tight">Sherlock</h1>
         <span className="hidden sm:inline label-caps ml-2">RCA + API DISCOVERY</span>
-        <div className="ml-auto"><EnvSwitcher env={env} onChange={setEnv} /></div>
+        <div className="ml-auto"><EnvSwitcher /></div>
       </header>
 
       {/* Body */}

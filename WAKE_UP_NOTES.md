@@ -1,6 +1,6 @@
 # Sherlock — Wake-Up Notes
 
-> **TL;DR**: Whole stack is built and 77/77 tests pass. Fill in `.env`, run `./scripts/start_dev.sh`, and you should be live. Live integrations against PPE infrastructure exercise on first real query — those couldn't be tested overnight (creds + hooks).
+> **TL;DR**: Whole stack is built and tests pass (109 unit + 9 live skipped without creds + 1 regression stub). Fill in `.env`, run `./scripts/start_dev.sh`, and you should be live. Live integrations against PPE infrastructure exercise on first real query.
 
 ---
 
@@ -88,7 +88,7 @@ Mobile demo via tunnel (separate terminal):
 | **Python 3.13.2 + Pydantic 2 + plain JS frontend** (not TS) | Plan called for 3.12+. JS over TS to minimize hackathon friction. |
 | **Vite proxy for /api → :8000** | Same-origin fetches in dev, no CORS dance. Keep this for prod by serving the built UI behind FastAPI. |
 | **Sub-agent dispatch via the `Task` tool** | Capped at 3 sub-agents per RCA, 4 tool calls each. Triggers when the agent detects independent investigation branches. |
-| **Audit redaction** (defense in depth) | Even if a tool arg accidentally carries a secret, the regex masks it before SQLite write. Five regex patterns, 10 tests. |
+| **Audit redaction** (defense in depth) | Even if a tool arg accidentally carries a secret, regex masks it before SQLite write. Six patterns covering: env-var assignments (DATADOG_API_KEY, MSSQL_PPE_PASSWORD, etc.), URL-embedded passwords (rediss://:pwd@host), Bearer tokens, AWS access keys, JWTs, OpenAI sk- keys. 19 tests. |
 | **TimedTool wraps every RCA tool call** | Audit log + duration tracking are always-on. Surfaces in the UI's audit panel. |
 
 ## Open items (for you, not blocking)
@@ -115,7 +115,7 @@ Mobile demo via tunnel (separate terminal):
 git log --oneline | wc -l   # ~16 commits since Initial commit
 find . -name '*.py' -not -path './.venv/*' -not -path './repos/*' | xargs wc -l | tail -1   # ~3.7K LOC Python
 find apps/web/src -name '*.jsx' -o -name '*.js' | xargs wc -l | tail -1   # ~700 LOC React
-77 tests, all green
+109 unit + 9 live (skipped) + 1 regression (skipped), all green
 0 external API calls made (no creds → graceful degrade)
 ```
 

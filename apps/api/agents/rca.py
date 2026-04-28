@@ -489,6 +489,13 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
         if not any_tool:
             break
 
+        # If write_final_rca was called this turn, exit before paying for
+        # one more LLM round-trip just to get a "done" message. The while
+        # predicate would catch this on the next iteration, but only after
+        # client.messages.create() runs once more.
+        if final_rca_written:
+            break
+
         history.append({"role": "user", "content": tool_results})
 
     if not final_rca_written:

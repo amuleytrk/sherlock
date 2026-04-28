@@ -157,7 +157,7 @@ For mobile / live demo, in another terminal:
 ### Test
 
 ```bash
-uv run pytest                          # 86 tests, ~10 sec
+uv run pytest                          # ~110 tests, ~10 sec
 uv run pytest tests/test_indexer_*.py  # indexer-only
 uv run pytest -m regression            # known-answer end-to-end (requires PPE creds)
 ```

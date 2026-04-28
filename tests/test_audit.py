@@ -49,6 +49,65 @@ def test_redact_passes_clean_text():
     assert redact(clean) == clean
 
 
+# These test cases come from the literal env var names this app uses. The
+# old `\b` regex passed them through unredacted because `\b` doesn't match
+# between two word chars (e.g. between `_` and `K` in `DATADOG_API_KEY`).
+def test_redact_datadog_api_key_envvar_form():
+    out = redact("DATADOG_API_KEY=abcdef0123456789-secret")
+    assert "abcdef0123456789-secret" not in out
+    assert "REDACTED" in out
+
+
+def test_redact_anthropic_api_key_envvar_form():
+    out = redact("ANTHROPIC_API_KEY=sk-ant-this-should-be-redacted-xyz")
+    assert "sk-ant-this-should-be-redacted-xyz" not in out
+
+
+def test_redact_mssql_password_envvar_form():
+    out = redact("MSSQL_PPE_PASSWORD=hunter2-with-special-$%^chars")
+    assert "hunter2-with-special-$%^chars" not in out
+
+
+def test_redact_cosmos_key_envvar_form():
+    # Cosmos keys are long base64-ish strings
+    out = redact("COSMOS_PPE_KEY=Q29zbW9zS2V5VGhhdEZha2VkSW5UZXN0RGF0YQ==")
+    assert "Q29zbW9zS2V5VGhhdEZha2VkSW5UZXN0RGF0YQ==" not in out
+
+
+def test_redact_redis_key_envvar_form():
+    out = redact("REDIS_PPE_KEY=AbCdEf123456=")
+    assert "AbCdEf123456=" not in out
+
+
+def test_redact_url_embedded_password():
+    """rediss://:secretpwd@host should preserve scheme/host but redact password."""
+    out = redact("connecting to rediss://:supersecretpwd@redis.example.com:6380")
+    assert "supersecretpwd" not in out
+    # Scheme and host should be preserved (so audit log is still useful)
+    assert "rediss://" in out
+    assert "redis.example.com" in out
+
+
+def test_redact_postgres_url():
+    out = redact("DATABASE_URL=postgresql://sherlock:hunter2@localhost:5432/sherlock")
+    assert "hunter2" not in out
+    # Host preserved
+    assert "localhost" in out
+    assert "postgresql://" in out
+
+
+def test_redact_url_without_password_unchanged():
+    """A URL with no embedded password should pass through untouched."""
+    out = redact("https://api.example.com/path?id=42")
+    assert out == "https://api.example.com/path?id=42"
+
+
+def test_redact_does_not_overmatch_dotted_keyword():
+    """A word like 'monkey' should not match 'key'."""
+    out = redact("the monkey patches are clean")
+    assert out == "the monkey patches are clean"
+
+
 def test_record_and_list_for_rca(tmp_path, monkeypatch):
     _isolate_db(tmp_path, monkeypatch)
     record(None, "rca_abc", "trk_mssql_query", {"query_type": "device_config", "params": {"tape_id": "AABB"}}, "ok", 42)

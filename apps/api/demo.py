@@ -37,8 +37,10 @@ def is_demo_query(message: str) -> str | None:
         return "discovery_lime_selection"
     if _matches(message, r"events.*not.*lookup_parcels", r"not appearing.*lookup", r"events not in lookup"):
         return "rca_events_not_in_lookup"
-    if _matches(message, r"500.*ingress", r"ingress.*500", r"ingress.*throwing"):
-        return "rca_ingress_500"
+    # Note: rca_ingress_500 was advertised here but never had a distinct
+    # canned scenario — the matcher was removed to avoid silently serving the
+    # lookup_parcels RCA when a user typed an ingress-500 prompt. Add a real
+    # scenario above this if you want a second RCA demo.
     return None
 
 
@@ -246,7 +248,14 @@ _RCA_EVENTS_NOT_IN_LOOKUP = {
 async def run_rca_demo(scenario_id: str, message: str, entities: dict | None = None) -> AsyncIterator[str]:
     """Stream a canned RCA scenario, including writing real evidence files
     into the scratch dir so the UI's RcaReport renders end-to-end."""
-    scenario = _RCA_EVENTS_NOT_IN_LOOKUP if scenario_id == "rca_events_not_in_lookup" else _RCA_EVENTS_NOT_IN_LOOKUP
+    scenarios = {
+        "rca_events_not_in_lookup": _RCA_EVENTS_NOT_IN_LOOKUP,
+    }
+    scenario = scenarios.get(scenario_id)
+    if scenario is None:
+        yield sse("status", {"phase": "demo", "msg": f"unknown demo RCA scenario: {scenario_id!r}"})
+        yield sse("done", {})
+        return
 
     s = get_settings()
     rca_id = scenario["rca_id_prefix"] + uuid.uuid4().hex[:6]
