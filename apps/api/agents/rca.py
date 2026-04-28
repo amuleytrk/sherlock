@@ -57,10 +57,24 @@ _MCP_DISPATCH: dict[str, tuple[str, str]] = {
 }
 
 
+def _datadog_available() -> bool:
+    """Datadog tools are advertised to the agent only when both API + App key
+    are populated. Without these, the trk-datadog MCP server can't authenticate,
+    so we hide the tools entirely — saves tokens and prevents the agent from
+    burning tool-call budget trying a path that would just fail."""
+    s = get_settings()
+    return bool(s.datadog_api_key and s.datadog_app_key)
+
+
 def _tool_definitions() -> list[dict]:
     """Tool schemas published to Claude. Includes MCP tools + filesystem
-    helpers + code_exec + Task + write_final_rca."""
-    return [
+    helpers + code_exec + Task + write_final_rca.
+
+    Datadog tools are only included when DATADOG_API_KEY + DATADOG_APP_KEY
+    are set — otherwise the agent uses kubectl as its only log source.
+    """
+    datadog_on = _datadog_available()
+    all_tools = [
         {
             "name": "sherlock_search",
             "description": "Hybrid search over the indexed Trackonomy code+docs corpus. Returns chunks with file_path:line_range citations.",
@@ -245,6 +259,10 @@ def _tool_definitions() -> list[dict]:
             },
         },
     ]
+
+    if not datadog_on:
+        all_tools = [t for t in all_tools if not t["name"].startswith("trk_datadog_")]
+    return all_tools
 
 
 async def _call_mcp_tool(tool_name: str, args: dict) -> str:
