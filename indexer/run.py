@@ -9,7 +9,10 @@ import argparse
 import sys
 from pathlib import Path
 
+import subprocess
+
 from apps.api.settings import get_settings
+from indexer.branches import load as load_branch_config
 from indexer.chunk import chunk_code, chunk_markdown
 from indexer.crawl import classify_file, walk_corpus
 from indexer.embed import upsert_chunks
@@ -25,6 +28,44 @@ def _service_for(path: Path, repos_root: Path) -> str:
         return rel.parts[0] if rel.parts else "platform"
     except ValueError:
         return "platform"
+
+
+def _validate_repos_on_correct_branches(repos_root: Path) -> None:
+    """Before indexing, fail loudly if any repo isn't on the branch declared
+    in repos.yml. Prevents silently indexing the wrong code (e.g. a feature
+    branch instead of release_1.20)."""
+    cfg = load_branch_config()
+    repos_root = repos_root.resolve()
+    failures = []
+    for repo in cfg.repos:
+        repo_path = repos_root / repo.name
+        if not repo_path.exists():
+            failures.append(f"  - {repo.name}: missing at {repo_path} — run `uv run python -m scripts.prepare_repos`")
+            continue
+        try:
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_path, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+            expected = subprocess.run(
+                ["git", "rev-parse", f"origin/{repo.branch}"],
+                cwd=repo_path, capture_output=True, text=True, check=True,
+            ).stdout.strip()
+        except subprocess.CalledProcessError as e:
+            failures.append(f"  - {repo.name}: git rev-parse failed: {e.stderr.strip()}")
+            continue
+        if head != expected:
+            failures.append(
+                f"  - {repo.name}: HEAD={head[:8]} but expected origin/{repo.branch}={expected[:8]}\n"
+                f"      → run `uv run python -m scripts.prepare_repos` to fix"
+            )
+    if failures:
+        msg = (
+            "Indexer aborted — one or more repos are not on the branch declared in repos.yml.\n"
+            "This means we'd be indexing the WRONG code (e.g. a feature branch instead of a release branch).\n\n"
+            + "\n".join(failures)
+        )
+        raise RuntimeError(msg)
 
 
 def index_path(path: Path, release: str, repos_root: Path) -> int:
@@ -71,6 +112,10 @@ def main():
         n = index_path(args.file, release, s.sherlock_repos_dir)
         print(f"indexed {n} chunks from {args.file}")
         return
+
+    # Full corpus mode: hard-fail if any repo is on the wrong branch.
+    if s.sherlock_repos_dir.exists():
+        _validate_repos_on_correct_branches(s.sherlock_repos_dir)
 
     roots = args.root or []
     if s.sherlock_repos_dir.exists():

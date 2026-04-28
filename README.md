@@ -130,8 +130,10 @@ docker compose up -d
 # 5. deploy the pgvector schema (idempotent)
 uv run python -m indexer.db
 
-# 6. point the indexer at the 5 source repos (symlinks existing clones)
-./scripts/clone_corpus.sh
+# 6. set up the 5 source repos as worktrees on their PPE release branches
+#    (declared in `repos.yml`; uses your existing clones under
+#    ~/Documents/repository/ when available, doesn't touch your working copy)
+uv run python -m scripts.prepare_repos
 
 # 7. build the corpus (~10 min, ~$1.20 in OpenAI embeddings)
 uv run python -m indexer.run
@@ -159,6 +161,20 @@ uv run pytest                          # 86 tests, ~10 sec
 uv run pytest tests/test_indexer_*.py  # indexer-only
 uv run pytest -m regression            # known-answer end-to-end (requires PPE creds)
 ```
+
+### Updating which release branch is indexed
+
+Each repo's PPE release branch is declared in [`repos.yml`](./repos.yml).
+When releases roll over, edit `repos.yml`, then re-run:
+
+```bash
+uv run python -m scripts.prepare_repos   # update worktrees
+uv run python -m indexer.run             # re-index (idempotent)
+```
+
+The indexer hard-fails if any repo on disk is on a different branch than
+the one declared in `repos.yml` — preventing silent indexing of the wrong
+code.
 
 ### Demo mode (no creds required)
 

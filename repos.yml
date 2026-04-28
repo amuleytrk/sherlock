@@ -1,0 +1,14 @@
+# Source-of-truth: which release branch maps to PPE for each indexed repo.
+#
+# Edit this file when releases roll over. After editing, re-run:
+#   uv run python -m scripts.prepare_repos
+# to update the worktrees, then re-run the indexer.
+
+release: ppe
+
+repos:
+  multi-tenant-core-services:    release_1.20
+  multitenant-messaging-service: release_1.19
+  trk-mt-airline-service:        release_1.19
+  ann-rule-engine:               release_2.0
+  multi-tenant-dashboard:        release_1.18.4

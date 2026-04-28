@@ -77,8 +77,13 @@ sherlock.db-wal
 # Generated OpenAPI specs from swagger-jsdoc pre-step
 .swagger-cache/
 
-# Cloned source repos for the indexer's corpus — pulled fresh each run
+# Worktrees for the indexer's corpus (pointed at release branches via
+# `scripts/prepare_repos.py`). Never commit — regenerate locally.
 repos/
+
+# Cache clones used by prepare_repos.py for repos the user doesn't have
+# checked out under ~/Documents/repository/.
+.git-cache/
 
 # Indexer cache (chunk hashes, embedding batches in flight)
 .indexer-cache/
