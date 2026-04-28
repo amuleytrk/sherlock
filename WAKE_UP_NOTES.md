@@ -42,9 +42,14 @@ The app **gracefully degrades** when keys are missing — Discovery returns a "k
 
 ### 2. Index the corpus
 
+`repos.yml` declares which release branch each repo is on for PPE. Edit
+that file when releases roll over.
+
 ```bash
-./scripts/clone_corpus.sh        # already symlinked your existing repos
-uv run python -m indexer.run     # ~10 min, ~$1.20 in OpenAI embeddings
+uv run python -m scripts.prepare_repos   # set up worktrees on the right branches
+                                          # (uses your existing clones; doesn't touch your working copy)
+uv run python -m indexer.run --limit 20  # cheap sanity check (~$0.05)
+uv run python -m indexer.run             # full corpus (~$0.50–$1.50, ~10 min)
 ```
 
 Verify with:
@@ -137,13 +142,14 @@ This bypasses Anthropic/OpenAI/PPE entirely. Useful for screenshots, mobile test
 ### Step 1+ — go live
 
 1. Open this file. (You're here.)
-2. Verify the test suite still passes: `uv run pytest` (expect 86/86)
-3. Fill in `.env` with real keys
+2. Verify the test suite still passes: `uv run pytest` (expect 100/100 + 8 live skips)
+3. Fill in `.env` with real keys (`uv run python -m scripts.preflight` validates each)
 4. Set `SHERLOCK_DEMO_MODE=0` in `.env`
-5. Run the indexer: `uv run python -m indexer.run` (smoke first via `--limit 50`, then full)
-6. `./scripts/start_dev.sh` and try a Discovery query in the browser
-7. If Discovery works, try an RCA query against a real PPE device you know the answer to
-8. Iterate the system prompt (`apps/api/prompts/rca_system.md`) if the agent's reasoning needs nudging
-9. Then move on to demo prep — DEMO.md script + recording
+5. Set up worktrees on the right release branches: `uv run python -m scripts.prepare_repos`
+6. Run the indexer: `uv run python -m indexer.run --limit 20` first (sanity check, ~$0.05), then `uv run python -m indexer.run` (full, ~$0.50–$1.50)
+7. `./scripts/start_dev.sh` and try a Discovery query in the browser
+8. If Discovery works, try an RCA query against a real PPE device you know the answer to
+9. Iterate the system prompt (`apps/api/prompts/rca_system.md`) if the agent's reasoning needs nudging
+10. Then move on to demo prep — DEMO.md script + recording
 
 Good morning. ☕
