@@ -44,7 +44,14 @@ def test_heuristic_classifies_feature_flag_question():
 
 
 def test_classify_falls_back_to_heuristic_when_no_api_key(monkeypatch):
-    # With no ANTHROPIC_API_KEY (the test env has empty), classify() returns the heuristic path.
+    """When ANTHROPIC_API_KEY is empty, classify() should use the heuristic
+    path. We stub get_settings to fake an empty key — robust against the
+    developer's local .env having a real key populated."""
+    class _FakeSettings:
+        anthropic_api_key = ""
+
+    monkeypatch.setattr("apps.api.router.get_settings", lambda: _FakeSettings())
+
     out = classify("Where is the lime selection algorithm implemented?")
     assert out.raw == "(heuristic)"
     assert out.intent == "API_DISCOVERY"
