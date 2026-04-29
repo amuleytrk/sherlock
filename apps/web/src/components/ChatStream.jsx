@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { streamChat } from "../lib/sse.js";
 import EvidenceCard from "./EvidenceCard.jsx";
 import RcaReport from "./RcaReport.jsx";
+import ThinkingIndicator from "./ThinkingIndicator.jsx";
 import ToolCallStatus from "./ToolCallStatus.jsx";
 
 export default function ChatStream({ session }) {
@@ -54,11 +55,14 @@ export default function ChatStream({ session }) {
   return (
     <div className="h-full flex flex-col">
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6 space-y-6">
-        {messages.length === 0 && trace.length === 0 && <Welcome />}
+        {messages.length === 0 && !busy && <Welcome />}
         {messages.map((m, i) => (
           <MessageBubble key={i} m={m} />
         ))}
-        {trace.length > 0 && <MessageBubble m={{ role: "agent", trace }} live />}
+        {/* Render the live agent bubble whenever a request is in flight, even
+            before the first SSE event arrives. The ThinkingIndicator inside
+            the bubble (when live=true) fills the gap before the router event. */}
+        {busy && <MessageBubble m={{ role: "agent", trace }} live />}
       </div>
 
       <form
@@ -141,11 +145,17 @@ function MessageBubble({ m, live = false }) {
     .join("");
   const timelineEvents = events.filter((e) => e.name !== "answer_delta");
 
+  // The thinking indicator is shown while the stream is in flight AND we
+  // haven't started rendering the final answer yet. It disappears as soon
+  // as the agent starts streaming tokens (Discovery) or finishes the RCA.
+  const showThinking = live && !answerText && !finalRcaEvent;
+
   return (
     <div className="space-y-3">
       {timelineEvents.map((e, i) => (
         <TraceEvent key={i} event={e} live={live && i === timelineEvents.length - 1} />
       ))}
+      {showThinking && <ThinkingIndicator />}
       {answerText && (
         <div className="prose-invert">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{answerText}</ReactMarkdown>

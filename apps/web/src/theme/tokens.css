@@ -59,6 +59,22 @@ h3 { font-size: 18px; font-weight: 500; line-height: 1.4; }
 }
 .animate-pulse-soft { animation: pulse-soft 2s ease-in-out infinite; }
 
+/* Used by ThinkingIndicator for the gerund-swap transition. The element is
+   forced to remount on each word via React `key` prop, so the keyframe
+   re-fires automatically. */
+@keyframes fade-in-word {
+  0%   { opacity: 0; transform: translateY(-2px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-word { animation: fade-in-word 0.32s ease-out; }
+
+/* Trailing ellipsis for the loading indicator — slow opacity wave. */
+@keyframes ellipsis {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 1; }
+}
+.animate-ellipsis { animation: ellipsis 1.6s ease-in-out infinite; }
+
 /* Markdown prose tweaks for the dark theme */
 .prose-invert {
   color: var(--ink);
