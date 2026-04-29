@@ -91,6 +91,15 @@ def index_path(path: Path, release: str, repos_root: Path) -> int:
         return 0
 
     chunks = [c for c in chunks if not contains_secret(c.content)]
+
+    # If contains_secret filtered out a parent chunk, its children would fail
+    # the chunks_parent_id_fkey constraint at upsert time. Nullify any
+    # parent_id reference pointing at a chunk that no longer survives.
+    surviving_ids = {c.chunk_id for c in chunks}
+    for c in chunks:
+        if c.parent_id and c.parent_id not in surviving_ids:
+            c.parent_id = None
+
     return upsert_chunks(chunks, verbose=False)
 
 

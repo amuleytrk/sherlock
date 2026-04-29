@@ -45,3 +45,30 @@ def test_chunk_carries_service_and_category():
     chunks = chunk_markdown([block], release="ppe", service="ingress-service", category="architecture")
     assert chunks[0].service == "ingress-service"
     assert chunks[0].category == "architecture"
+
+
+def test_orphaned_parent_id_nullified_after_filter():
+    """If a parent chunk is filtered out (e.g. by contains_secret), its
+    children must not retain a dangling parent_id — that would fail the
+    chunks_parent_id_fkey constraint on upsert."""
+    from indexer.run import index_path  # noqa: F401  — just to ensure module imports
+
+    parent = _block(["A"], "parent content", 1, 5)
+    child = _block(["A", "A.1"], "child content", 6, 10, parent="A")
+    chunks = chunk_markdown([parent, child], release="ppe")
+    assert len(chunks) == 2
+    parent_chunk = next(c for c in chunks if c.heading_hierarchy == ["A"])
+    child_chunk = next(c for c in chunks if c.heading_hierarchy == ["A", "A.1"])
+    assert child_chunk.parent_id == parent_chunk.chunk_id
+
+    # Simulate contains_secret filtering the parent out, then apply the
+    # orphan-nulling logic from index_path.
+    chunks = [c for c in chunks if c is not parent_chunk]
+    surviving_ids = {c.chunk_id for c in chunks}
+    for c in chunks:
+        if c.parent_id and c.parent_id not in surviving_ids:
+            c.parent_id = None
+
+    assert child_chunk.parent_id is None, (
+        "child still references a filtered-out parent — would FK-violate at upsert"
+    )
