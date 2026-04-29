@@ -52,6 +52,15 @@ const WORDS = [
   "Correlating across services",
   "Walking the bug-tree",
 
+  // BBC Sherlock (Benedict Cumberbatch) homages
+  "Mind palacing",          // "I need to go to my mind palace"
+  "Noticing, not knowing",  // "I didn't know, I noticed"
+  "Cumberbatching",         // for the man himself
+  "Holmes-ing it",
+  "Game afooting",          // "the game is afoot"
+  "Out-witting Moriarty",
+  "Reichenbach-ing",        // for the fans who lost a year to that cliffhanger
+
   // The Claude Code homage
   "Razzmatazing",
   "Discombobulating",
