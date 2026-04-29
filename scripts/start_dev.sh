@@ -121,5 +121,9 @@ echo ""
 echo "  Press Ctrl-C to stop everything."
 echo "============================================================"
 
-# Wait for either to exit; cleanup() (via trap) kills the other.
-wait -n "$API_PID" "$WEB_PID"
+# Block until either child exits; cleanup() (via trap) kills the surviving one.
+# Avoids `wait -n` (bash 4.3+) — macOS ships bash 3.2 by default, so we poll
+# instead. Polls cheaply once per second.
+while kill -0 "$API_PID" 2>/dev/null && kill -0 "$WEB_PID" 2>/dev/null; do
+  sleep 1
+done
