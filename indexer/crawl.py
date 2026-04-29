@@ -32,6 +32,21 @@ EXCLUDE_DIR_NAMES = {
     ".pytest_cache", ".mypy_cache", ".ruff_cache",
 }
 
+
+# Specific directory paths to skip — used for user-specific opt-outs that are
+# too narrow to live in EXCLUDE_DIR_NAMES (e.g. excluding a folder by exact
+# location rather than just by name). Resolved at walk time so tests can
+# monkeypatch the list.
+EXCLUDE_PATH_PREFIXES: list[Path] = [
+    # Raw log dumps under ~/plans/work/logs/ — may contain PII / correlation
+    # IDs / device identifiers from production traces. The user opted out.
+    Path.home() / "plans" / "work" / "logs",
+    # Sherlock's own design / brainstorm / implementation plans. Indexing
+    # these creates a recursion loop where the agent searches "how should I
+    # do RCA?" and gets back its own design doc.
+    Path.home() / "plans" / "work" / "designs" / "rca-tool",
+]
+
 EXCLUDE_SUFFIXES = {
     ".canvas", ".lock", ".log",
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
@@ -67,12 +82,33 @@ def classify_file(path: Path) -> str | None:
 
 def walk_corpus(roots: list[Path]) -> Iterator[Path]:
     """Yield indexable files under each root, skipping excluded dirs."""
+    # Resolve once per call so symlinks/trailing-slashes are normalized.
+    excluded_prefixes = [p.resolve() for p in EXCLUDE_PATH_PREFIXES]
     for root in roots:
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
             if any(part in EXCLUDE_DIR_NAMES for part in path.parts):
                 continue
+            try:
+                resolved = path.resolve()
+            except (OSError, ValueError):
+                continue
+            if any(_is_under(resolved, prefix) for prefix in excluded_prefixes):
+                continue
             if classify_file(path) is None:
                 continue
             yield path
+
+
+def _is_under(path: Path, prefix: Path) -> bool:
+    """Return True if `path` is the prefix or any descendant of it."""
+    try:
+        return path.is_relative_to(prefix)
+    except (AttributeError, ValueError):
+        # Pre-3.9 fallback (we're on 3.13, but defensive)
+        try:
+            path.relative_to(prefix)
+            return True
+        except ValueError:
+            return False

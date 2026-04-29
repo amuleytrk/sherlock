@@ -71,3 +71,64 @@ def test_walk_corpus_excludes_dist_and_dotgit(tmp_path: Path):
     # some platforms. Match the dir we care about more precisely.
     assert not any("/dist/" in p or p.endswith("/dist") for p in paths)
     assert not any("/.git/" in p for p in paths)
+
+
+def test_walk_corpus_excludes_path_prefixes(tmp_path: Path, monkeypatch):
+    """Path-based exclusions (e.g. ~/plans/work/logs and the rca-tool
+    design dir) should skip any file under the excluded path."""
+    from indexer import crawl as crawl_mod
+
+    # Create a fake plans/work tree
+    plans = tmp_path / "plans" / "work"
+    (plans / "designs" / "platform").mkdir(parents=True)
+    (plans / "designs" / "platform" / "systemFlow.md").write_text("# system flow")
+
+    (plans / "designs" / "rca-tool").mkdir(parents=True)
+    (plans / "designs" / "rca-tool" / "sherlock-design.md").write_text("# self-ref")
+    (plans / "designs" / "rca-tool" / "implementation").mkdir()
+    (plans / "designs" / "rca-tool" / "implementation" / "day-1.md").write_text("# day 1")
+
+    (plans / "logs").mkdir()
+    (plans / "logs" / "raw-trace.md").write_text("# log dump")
+
+    (plans / "customer-docs").mkdir()
+    (plans / "customer-docs" / "delta.md").write_text("# delta info")
+
+    monkeypatch.setattr(crawl_mod, "EXCLUDE_PATH_PREFIXES", [
+        plans / "logs",
+        plans / "designs" / "rca-tool",
+    ])
+
+    files = list(crawl_mod.walk_corpus([plans]))
+    paths = [str(f) for f in files]
+
+    # Kept: systemFlow.md and customer-docs
+    assert any("systemFlow.md" in p for p in paths)
+    assert any("customer-docs/delta.md" in p for p in paths)
+
+    # Excluded: anything under logs/ or designs/rca-tool/
+    assert not any("/logs/" in p for p in paths)
+    assert not any("/rca-tool/" in p for p in paths)
+    assert not any("sherlock-design.md" in p for p in paths)
+    assert not any("day-1.md" in p for p in paths)
+
+
+def test_walk_corpus_path_prefix_does_not_match_substring(tmp_path: Path, monkeypatch):
+    """A prefix exclusion of `/foo/bar` should not also exclude `/foo/bar-baz/`
+    (substring vs path-component match)."""
+    from indexer import crawl as crawl_mod
+
+    (tmp_path / "rca-tool").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "rca-tool" / "doc.md").write_text("# nope")
+    (tmp_path / "rca-tool-extra").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "rca-tool-extra" / "doc.md").write_text("# yes please")
+
+    monkeypatch.setattr(crawl_mod, "EXCLUDE_PATH_PREFIXES", [tmp_path / "rca-tool"])
+
+    files = list(crawl_mod.walk_corpus([tmp_path]))
+    paths = [str(f) for f in files]
+
+    # rca-tool/doc.md excluded; rca-tool-extra/doc.md kept
+    assert any("rca-tool-extra/doc.md" in p for p in paths)
+    # The excluded one shouldn't be in the kept list
+    assert sum(1 for p in paths if p.endswith("/rca-tool/doc.md")) == 0
