@@ -35,6 +35,15 @@ export default function App() {
     setDrawerOpen(false);
   }
 
+  function handleDeleted(deletedId) {
+    // If the deleted session (or "all") was the one on screen, drop it +
+    // remount ChatStream so the user lands on a fresh chat.
+    if (deletedId === "__all__" || deletedId === activeSession?.id) {
+      setActiveSession(null);
+      setNewChatNonce((n) => n + 1);
+    }
+  }
+
   return (
     <div className="h-screen w-screen flex flex-col">
       {/* Top bar */}
@@ -69,6 +78,7 @@ export default function App() {
             activeSession={activeSession}
             onSelect={handleSelect}
             onNew={handleNew}
+            onDeleted={handleDeleted}
             refreshKey={sessionVersion}
           />
         </aside>

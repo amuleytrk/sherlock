@@ -236,6 +236,24 @@ Adding a new env (e.g. **prod**) requires zero code changes:
 configured env — use it to verify Stage credentials end-to-end before
 relying on them.
 
+### Session history & cleanup
+
+Every chat persists to local SQLite (`./sherlock.db`) so the sidebar shows
+past investigations. To clean up:
+
+- **Trash icon** on each sidebar entry → cascade-delete that one session,
+  its messages, audit rows, and the matching `investigations/<rca_id>/`
+  scratch dir.
+- **"Clear all"** in the sidebar header → nuke everything.
+- **Auto-flush at startup** — set `SHERLOCK_EPHEMERAL_SESSIONS=1` in `.env`
+  and every server boot wipes persisted state, so each launch starts
+  fresh. Recommended for demo builds; leave off while developing
+  (restarts are common, and you'll want history to survive them).
+
+Why startup-flush instead of shutdown-flush? Shutdown hooks don't run on
+crashes / `kill -9` / OS sleep, so they're inconsistent. Startup-flush
+always runs and produces the same end-user effect.
+
 ### Demo mode (no creds required)
 
 To see Sherlock work without setting up Anthropic/OpenAI/PPE:

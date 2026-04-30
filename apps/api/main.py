@@ -1,14 +1,20 @@
 """Sherlock FastAPI app — entry point for the web UI.
 
 Routes:
-    GET  /health                  — liveness probe + active env list
-    GET  /envs                    — configured envs + per-tool availability
-    POST /chat                    — SSE-streamed agent trace for a user message
-    GET  /sessions                — list past sessions (newest first, max 50)
-    GET  /sessions/{id}           — fetch a single session + its messages
-    GET  /rca/{rca_id}            — fetch a synthesized RCA artifact + analysis files
-    GET  /rca/{rca_id}/audit      — fetch tool-call audit log for an RCA
-    GET  /artifacts?path=...      — serve a file from the investigations dir (path-confined)
+    GET    /health                  — liveness probe + active env list
+    GET    /envs                    — configured envs + per-tool availability
+    POST   /chat                    — SSE-streamed agent trace for a user message
+    GET    /sessions                — list past sessions (newest first, max 50)
+    GET    /sessions/{id}           — fetch a single session + its messages
+    DELETE /sessions/{id}           — cascade-delete a session + its RCA scratch dirs
+    DELETE /sessions                — cascade-delete every session ("Clear all")
+    GET    /rca/{rca_id}            — fetch a synthesized RCA artifact + analysis files
+    GET    /rca/{rca_id}/audit      — fetch tool-call audit log for an RCA
+    GET    /artifacts?path=...      — serve a file from the investigations dir (path-confined)
+
+Lifecycle: when SHERLOCK_EPHEMERAL_SESSIONS=1, the FastAPI startup hook wipes
+every session/message/audit row and every investigations/<rca_id>/ scratch
+dir, so each launch begins with a clean slate.
 """
 from __future__ import annotations
 
@@ -29,6 +35,22 @@ from apps.api.settings import get_settings
 from apps.api.sse import sse
 
 app = FastAPI(title="Sherlock", version="0.1.0")
+
+
+@app.on_event("startup")
+def _maybe_flush_on_startup() -> None:
+    """When SHERLOCK_EPHEMERAL_SESSIONS=1, wipe persisted state at boot so the
+    next launch starts fresh. Runs unconditionally on every startup — robust
+    against crashes / forced kills (vs. a shutdown hook, which can be skipped)."""
+    s = get_settings()
+    if not s.sherlock_ephemeral_sessions:
+        return
+    summary = store.delete_all_sessions()
+    print(
+        f"[sherlock] ephemeral mode: wiped {summary['sessions_deleted']} sessions, "
+        f"{summary['messages_deleted']} messages, {summary['audit_entries_deleted']} audit rows, "
+        f"{summary['rca_ids_seen']} RCA scratch dirs"
+    )
 
 
 @app.get("/health")
@@ -196,6 +218,20 @@ def get_session_endpoint(session_id: str):
     if not sess:
         raise HTTPException(status_code=404, detail="session not found")
     return {**sess, "messages": store.get_session_messages(session_id)}
+
+
+@app.delete("/sessions/{session_id}")
+def delete_session_endpoint(session_id: str):
+    """Cascade-delete a single session, its messages, audit rows, and any
+    linked investigations/<rca_id>/ scratch dirs."""
+    return store.delete_session(session_id)
+
+
+@app.delete("/sessions")
+def delete_all_sessions_endpoint():
+    """Wipe every session, message, audit entry, and RCA scratch dir.
+    Used by the "Clear all" UI button."""
+    return store.delete_all_sessions()
 
 
 def _resolve_artifact_path(path: str) -> Path:

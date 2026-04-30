@@ -24,6 +24,18 @@ export async function getSession(sessionId) {
   return r.json();
 }
 
+export async function deleteSession(sessionId) {
+  const r = await fetch(`/api/sessions/${sessionId}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(`DELETE /sessions/${sessionId} → ${r.status}`);
+  return r.json();
+}
+
+export async function deleteAllSessions() {
+  const r = await fetch(`/api/sessions`, { method: "DELETE" });
+  if (!r.ok) throw new Error(`DELETE /sessions → ${r.status}`);
+  return r.json();
+}
+
 export async function getRca(rcaId) {
   const r = await fetch(`/api/rca/${rcaId}`);
   if (!r.ok) throw new Error(`/rca/${rcaId} → ${r.status}`);

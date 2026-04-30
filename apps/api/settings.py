@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     sherlock_db_path: Path = Path("./sherlock.db")
     sherlock_demo_mode: bool = False
 
+    # If true, every server startup wipes all sessions, messages, audit log,
+    # and matching investigations/<rca_id>/ scratch dirs. Useful for demo
+    # builds that should always launch with a clean slate. Leave off (default)
+    # while developing — restarts are common and you want history to survive.
+    sherlock_ephemeral_sessions: bool = False
+
     def configured_envs(self) -> list[str]:
         """The envs this instance is configured to talk to, in display order."""
         return [e.strip().lower() for e in self.sherlock_envs.split(",") if e.strip()]
