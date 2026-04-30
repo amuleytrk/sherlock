@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { streamChat } from "../lib/sse.js";
+import ConfidenceBadge from "./ConfidenceBadge.jsx";
 import EvidenceCard from "./EvidenceCard.jsx";
 import RcaReport from "./RcaReport.jsx";
 import ThinkingIndicator from "./ThinkingIndicator.jsx";
@@ -162,12 +163,14 @@ function MessageBubble({ m, live = false }) {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
           </div>
         )}
+        {m.verification && <ConfidenceBadge verification={m.verification} />}
       </div>
     );
   }
   // Agent turn — render trace events
   const events = m.trace ?? [];
   const finalRcaEvent = events.find((e) => e.name === "rca_done");
+  const verificationEvent = events.find((e) => e.name === "verification");
 
   // Accumulate streaming answer_delta tokens into a single markdown blob so
   // formatting (citations, code, lists) renders correctly. Filter the deltas
@@ -195,6 +198,9 @@ function MessageBubble({ m, live = false }) {
         </div>
       )}
       {finalRcaEvent && <RcaReport rcaId={finalRcaEvent.data.rca_id} />}
+      {verificationEvent && (
+        <ConfidenceBadge verification={verificationEvent.data} />
+      )}
     </div>
   );
 }

@@ -65,6 +65,16 @@ class Settings(BaseSettings):
     # while developing — restarts are common and you want history to survive.
     sherlock_ephemeral_sessions: bool = False
 
+    # Proactive mode (Pick 1): scheduled briefings + anomaly watcher.
+    # Master switch — leave off in CI / unit tests.
+    sherlock_proactive_enabled: bool = False
+    # How often the briefing cron tick fires. Default 6h (4 briefings/day);
+    # set lower for demos, higher for prod once tuned.
+    sherlock_briefing_interval_seconds: int = 21600
+    # Run one briefing immediately on startup so the Briefings tab is never
+    # empty when judges open the demo.
+    sherlock_briefing_on_startup: bool = True
+
     def configured_envs(self) -> list[str]:
         """The envs this instance is configured to talk to, in display order."""
         return [e.strip().lower() for e in self.sherlock_envs.split(",") if e.strip()]

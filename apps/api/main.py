@@ -11,15 +11,21 @@ Routes:
     GET    /rca/{rca_id}            — fetch a synthesized RCA artifact + analysis files
     GET    /rca/{rca_id}/audit      — fetch tool-call audit log for an RCA
     GET    /artifacts?path=...      — serve a file from the investigations dir (path-confined)
+    GET    /briefings               — list scheduled / on-demand health briefings
+    GET    /briefings/{id}          — fetch one briefing's full markdown
+    POST   /briefings/run           — trigger a briefing on demand
+    POST   /trace                   — SSE cross-service request trace by identifier
 
-Lifecycle: when SHERLOCK_EPHEMERAL_SESSIONS=1, the FastAPI startup hook wipes
-every session/message/audit row and every investigations/<rca_id>/ scratch
-dir, so each launch begins with a clean slate.
+Lifecycle: when SHERLOCK_EPHEMERAL_SESSIONS=1, the FastAPI lifespan startup
+wipes every session/message/audit row and every investigations/<rca_id>/
+scratch dir, so each launch begins with a clean slate. Briefings have an
+independent lifecycle and survive ephemeral wipes.
 """
 from __future__ import annotations
 
 import json
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -30,27 +36,45 @@ from apps.api import audit, demo, store
 from apps.api.agents.discovery import run_discovery
 from apps.api.agents.rca import run_rca
 from apps.api.env_context import active_env, active_system
+from apps.api.proactive.briefing import run_briefing
+from apps.api.proactive.scheduler import get_scheduler
+from apps.api.trace.runner import run_trace
 from apps.api.router import classify
 from apps.api.settings import get_settings
 from apps.api.sse import sse
 
-app = FastAPI(title="Sherlock", version="0.1.0")
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Startup + shutdown lifecycle.
 
-@app.on_event("startup")
-def _maybe_flush_on_startup() -> None:
-    """When SHERLOCK_EPHEMERAL_SESSIONS=1, wipe persisted state at boot so the
-    next launch starts fresh. Runs unconditionally on every startup — robust
-    against crashes / forced kills (vs. a shutdown hook, which can be skipped)."""
+    On startup:
+      - If SHERLOCK_EPHEMERAL_SESSIONS=1, wipe sessions + RCA scratch dirs.
+      - If SHERLOCK_PROACTIVE_ENABLED=1, kick the briefing scheduler loop.
+
+    On shutdown: stop the scheduler cleanly (best-effort)."""
     s = get_settings()
-    if not s.sherlock_ephemeral_sessions:
-        return
-    summary = store.delete_all_sessions()
-    print(
-        f"[sherlock] ephemeral mode: wiped {summary['sessions_deleted']} sessions, "
-        f"{summary['messages_deleted']} messages, {summary['audit_entries_deleted']} audit rows, "
-        f"{summary['rca_ids_seen']} RCA scratch dirs"
-    )
+    if s.sherlock_ephemeral_sessions:
+        summary = store.delete_all_sessions()
+        print(
+            f"[sherlock] ephemeral mode: wiped {summary['sessions_deleted']} sessions, "
+            f"{summary['messages_deleted']} messages, {summary['audit_entries_deleted']} audit rows, "
+            f"{summary['rca_ids_seen']} RCA scratch dirs (briefings preserved)"
+        )
+
+    scheduler = get_scheduler() if s.sherlock_proactive_enabled else None
+    if scheduler is not None:
+        scheduler.start()
+        print(f"[sherlock] proactive scheduler started (interval={s.sherlock_briefing_interval_seconds}s)")
+
+    try:
+        yield
+    finally:
+        if scheduler is not None:
+            await scheduler.stop()
+
+
+app = FastAPI(title="Sherlock", version="0.2.0", lifespan=_lifespan)
 
 
 @app.get("/health")
@@ -188,6 +212,7 @@ async def _record_session(req: ChatRequest):
     answer_chunks: list[str] = []
     final_answer: str | None = None
     rca_id: str | None = None
+    verification: dict | None = None
 
     try:
         async for chunk in _dispatch(req):
@@ -204,17 +229,42 @@ async def _record_session(req: ChatRequest):
                 r = data.get("rca_id")
                 if isinstance(r, str):
                     rca_id = r
+            elif name == "verification":
+                # Discovery emits this AFTER the answer is fully streamed.
+                if isinstance(data, dict):
+                    verification = data
             yield chunk
     finally:
         # finally{} runs even if the client disconnects mid-stream, so
         # whatever the agent has produced so far still gets persisted.
+        new_msg_id: int | None = None
         if rca_id:
-            # The full RCA report is recoverable via /rca/{rca_id}; no body needed.
-            store.append_message(session_id, role="agent", content="", rca_id=rca_id)
+            new_msg_id = store.append_message(
+                session_id, role="agent", content="", rca_id=rca_id,
+            )
         elif answer_chunks:
-            store.append_message(session_id, role="agent", content="".join(answer_chunks))
+            new_msg_id = store.append_message(
+                session_id, role="agent", content="".join(answer_chunks),
+            )
         elif final_answer:
-            store.append_message(session_id, role="agent", content=final_answer)
+            new_msg_id = store.append_message(
+                session_id, role="agent", content=final_answer,
+            )
+
+        # Persist the trust-layer verification alongside the message it
+        # rated, so reloading a past session keeps the badge.
+        if verification is not None and new_msg_id is not None:
+            try:
+                store.insert_claim_eval(
+                    session_id=session_id, rca_id=rca_id,
+                    message_id=new_msg_id,
+                    aggregate_score=int(verification.get("score", 0)),
+                    confidence_band=str(verification.get("band", "yellow")),
+                    claims=verification.get("claims", []),
+                )
+            except Exception:
+                # Persistence is best-effort; never fail the chat over it.
+                pass
 
 
 @app.post("/chat")
@@ -249,6 +299,78 @@ def delete_all_sessions_endpoint():
     """Wipe every session, message, audit entry, and RCA scratch dir.
     Used by the "Clear all" UI button."""
     return store.delete_all_sessions()
+
+
+# --- Briefings (proactive mode) ---
+
+
+class BriefingRunRequest(BaseModel):
+    env: str | None = None
+    system: str | None = None
+
+
+@app.get("/briefings")
+def list_briefings_endpoint():
+    """Most recent briefings, newest first."""
+    return {"briefings": store.list_briefings(limit=30)}
+
+
+@app.get("/briefings/{briefing_id}")
+def get_briefing_endpoint(briefing_id: int):
+    rec = store.get_briefing(briefing_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail="briefing not found")
+    return rec
+
+
+@app.post("/briefings/run")
+async def run_briefing_endpoint(req: BriefingRunRequest):
+    """Trigger a briefing on demand. Honors the active env/system overrides."""
+    s = get_settings()
+    env = (req.env or s.sherlock_default_env).lower()
+    if env not in s.configured_envs():
+        raise HTTPException(status_code=400, detail=f"unknown env: {env}")
+    system = (req.system or "mssql").lower()
+    if system not in {"mssql", "postgres"}:
+        raise HTTPException(status_code=400, detail=f"unknown system: {system}")
+    active_env.set(env)
+    active_system.set(system)
+    return await run_briefing(triggered_by="manual")
+
+
+# --- Cross-service trace ---
+
+
+class TraceRequest(BaseModel):
+    identifier: str
+    env: str | None = None
+    system: str | None = None
+    since_seconds: int = 3600
+    hint: str | None = None        # 'milestone' | 'device_event' | None (auto-detect)
+
+
+@app.post("/trace")
+async def trace_endpoint(req: TraceRequest):
+    """SSE-streamed cross-service trace by identifier."""
+    s = get_settings()
+    env = (req.env or s.sherlock_default_env).lower()
+    if env not in s.configured_envs():
+        raise HTTPException(status_code=400, detail=f"unknown env: {env}")
+    system = (req.system or "mssql").lower()
+    active_env.set(env)
+    active_system.set(system)
+    cfg = s.env_config(env)
+
+    async def stream():
+        async for evt in run_trace(
+            req.identifier.strip(),
+            cfg=cfg,
+            since_seconds=max(60, min(req.since_seconds, 86400)),
+            hint=req.hint,
+        ):
+            yield evt
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 def _resolve_artifact_path(path: str) -> Path:

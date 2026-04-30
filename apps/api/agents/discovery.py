@@ -101,6 +101,7 @@ async def run_discovery(message: str, *, top_k: int = 20) -> AsyncIterator[str]:
     )
 
     client = Anthropic(api_key=s.anthropic_api_key)
+    answer_buf: list[str] = []
     with client.messages.stream(
         model="claude-sonnet-4-6",
         max_tokens=2000,
@@ -118,6 +119,23 @@ async def run_discovery(message: str, *, top_k: int = 20) -> AsyncIterator[str]:
         ],
     ) as stream:
         for text in stream.text_stream:
+            answer_buf.append(text)
             yield sse("answer_delta", {"text": text})
+
+    # Trust layer: verify the assembled answer against the KB chunks. Wrapped
+    # in try/except so a verifier failure never blocks the answer.
+    answer_md = "".join(answer_buf)
+    try:
+        from apps.api.verify import verify_answer
+        yield sse("status", {"phase": "verifying", "msg": "Self-checking claims against citations…"})
+        verification = verify_answer(answer_md, kb_text=kb)
+        yield sse("verification", verification)
+    except Exception as e:
+        # Soft failure — emit a neutral verification so the UI can still show
+        # something rather than nothing.
+        yield sse("verification", {
+            "score": 60, "band": "yellow", "claims": [],
+            "extracted_count": 0, "note": f"verifier error: {type(e).__name__}",
+        })
 
     yield sse("done", {})

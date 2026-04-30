@@ -36,6 +36,28 @@ export async function deleteAllSessions() {
   return r.json();
 }
 
+export async function listBriefings() {
+  const r = await fetch("/api/briefings");
+  if (!r.ok) return { briefings: [] };
+  return r.json();
+}
+
+export async function getBriefing(id) {
+  const r = await fetch(`/api/briefings/${id}`);
+  if (!r.ok) throw new Error(`/briefings/${id} → ${r.status}`);
+  return r.json();
+}
+
+export async function runBriefing({ env = null, system = null } = {}) {
+  const r = await fetch("/api/briefings/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ env, system }),
+  });
+  if (!r.ok) throw new Error(`POST /briefings/run → ${r.status}`);
+  return r.json();
+}
+
 export async function getRca(rcaId) {
   const r = await fetch(`/api/rca/${rcaId}`);
   if (!r.ok) throw new Error(`/rca/${rcaId} → ${r.status}`);

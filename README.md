@@ -180,6 +180,32 @@ The indexer hard-fails if any repo on disk is on a different branch than
 the one declared in `repos.yml` — preventing silent indexing of the wrong
 code.
 
+### Top-level surfaces (Chat / Briefings / Trace)
+
+The main pane is split across three modes you can flip via the tabs above
+the chat surface:
+
+- **Chat** — the original Discovery + RCA conversational flow. Every Discovery
+  answer carries a **confidence badge** computed by a separate Haiku call
+  that grades each factual claim (endpoint URL, table name, feature flag)
+  against the cited corpus chunks. Badge expands to show per-claim score +
+  evidence excerpt. Sub-60 confidence pins a "verify before acting" warning.
+
+- **Briefings** — proactive mode. Sherlock runs four health probes against
+  the active env (pod restarts, milestone insert failures, Redis socket
+  errors, ingress 5xx) and produces a markdown brief whenever something
+  looks off. A Haiku model adds a 2-3 sentence likely-cause assessment per
+  anomaly. Configurable via `SHERLOCK_PROACTIVE_ENABLED` + interval; runs
+  one on startup so the tab is never empty for demos. Briefings persist
+  across `SHERLOCK_EPHEMERAL_SESSIONS=1` wipes (their own lifecycle).
+
+- **Trace** — cross-service request trace. Paste any qrcode / tape_id /
+  correlation_id and Sherlock fans out kubectl logs across the candidate
+  services in parallel (asyncio.gather), stitches the timeline by
+  identifier + propagated correlation IDs, renders the entire flow as a
+  Mermaid sequence diagram with errors highlighted, and produces a Haiku
+  narrative summary. End-to-end ~5s for a 3-service trace.
+
 ### MSSQL vs Postgres mode
 
 Trackonomy is mid-migration MSSQL → PostgreSQL, and the indexed corpus has

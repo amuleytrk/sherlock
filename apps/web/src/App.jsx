@@ -1,6 +1,8 @@
 import { useState } from "react";
 import HistorySidebar from "./components/HistorySidebar.jsx";
 import ChatStream from "./components/ChatStream.jsx";
+import BriefingsPane from "./components/BriefingsPane.jsx";
+import TracePane from "./components/TracePane.jsx";
 import EnvSwitcher from "./components/EnvSwitcher.jsx";
 import SystemSwitcher from "./components/SystemSwitcher.jsx";
 import { getSession } from "./lib/api.js";
@@ -22,6 +24,9 @@ export default function App() {
   // Active DB system filter (mssql / postgres). Scopes RAG retrieval to
   // the matching corpus subset so PG-only docs don't pollute MSSQL answers.
   const [activeSystem, setActiveSystem] = useState("");
+  // Which top-level surface is shown on the right: chat | briefings | trace.
+  // Sidebar stays visible across all modes so chat history is always reachable.
+  const [mode, setMode] = useState("chat");
 
   async function handleSelect(stub) {
     try {
@@ -30,12 +35,14 @@ export default function App() {
     } catch {
       setActiveSession(stub);
     }
+    setMode("chat");
     setDrawerOpen(false);
   }
 
   function handleNew() {
     setActiveSession(null);
     setNewChatNonce((n) => n + 1);
+    setMode("chat");
     setDrawerOpen(false);
   }
 
@@ -96,14 +103,46 @@ export default function App() {
           />
         )}
 
-        <main className="flex-1 overflow-hidden">
-          <ChatStream
-            key={activeSession?.id ?? `new-${newChatNonce}`}
-            session={activeSession}
-            env={activeEnv}
-            system={activeSystem}
-            onTurnComplete={() => setSessionVersion((v) => v + 1)}
-          />
+        <main className="flex-1 overflow-hidden flex flex-col">
+          {/* Mode tabs */}
+          <nav className="flex items-center gap-1 px-3 pt-2 border-b border-outline-soft bg-surface/40">
+            {[
+              { id: "chat", label: "Chat" },
+              { id: "briefings", label: "Briefings" },
+              { id: "trace", label: "Trace" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setMode(t.id)}
+                className={`
+                  px-3 py-1.5 text-xs font-tech rounded-t transition relative
+                  ${mode === t.id
+                    ? "bg-surface text-primary border border-outline-soft border-b-surface"
+                    : "text-ink-muted hover:text-ink hover:bg-surface-2"}
+                `}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+
+          <div className="flex-1 overflow-hidden">
+            {mode === "chat" && (
+              <ChatStream
+                key={activeSession?.id ?? `new-${newChatNonce}`}
+                session={activeSession}
+                env={activeEnv}
+                system={activeSystem}
+                onTurnComplete={() => setSessionVersion((v) => v + 1)}
+              />
+            )}
+            {mode === "briefings" && (
+              <BriefingsPane env={activeEnv} system={activeSystem} />
+            )}
+            {mode === "trace" && (
+              <TracePane env={activeEnv} system={activeSystem} />
+            )}
+          </div>
         </main>
       </div>
     </div>
