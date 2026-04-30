@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS vector_store.chunks (
     release           TEXT NOT NULL,
     service           TEXT NOT NULL,
     category          TEXT NOT NULL,
+    -- Trackonomy is migrating MSSQL → PostgreSQL. The corpus has docs and
+    -- code from both eras. `system` lets the UI dropdown filter retrieval
+    -- so e.g. an MSSQL-mode discovery query never surfaces PG-flavored
+    -- table names. Values: 'mssql', 'postgres', 'both' (system-agnostic).
+    system            TEXT NOT NULL DEFAULT 'both',
     file_path         TEXT NOT NULL,
     line_start        INTEGER,
     line_end          INTEGER,
@@ -36,6 +41,9 @@ CREATE TABLE IF NOT EXISTS vector_store.chunks (
     last_modified     TIMESTAMPTZ,
     created_at        TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Backfill for existing installs that pre-date the system column.
+ALTER TABLE vector_store.chunks ADD COLUMN IF NOT EXISTS system TEXT NOT NULL DEFAULT 'both';
 
 -- Note: pgvector's HNSW index doesn't support 3072-d vectors directly
 -- (max 2000 dims for HNSW). For 3072 we have two options:
@@ -60,6 +68,9 @@ CREATE INDEX IF NOT EXISTS idx_chunks_category
 
 CREATE INDEX IF NOT EXISTS idx_chunks_release_service
     ON vector_store.chunks (release, service);
+
+CREATE INDEX IF NOT EXISTS idx_chunks_system
+    ON vector_store.chunks (system);
 """
 
 

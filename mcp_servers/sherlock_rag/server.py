@@ -41,6 +41,7 @@ WITH dense AS (
     WHERE release = %(release)s
       AND (%(service_filter)s::text IS NULL OR service = %(service_filter)s)
       AND (%(category_filter)s::text IS NULL OR category = %(category_filter)s)
+      AND (%(system_filter)s::text IS NULL OR system IN (%(system_filter)s, 'both'))
     ORDER BY embedding::halfvec(3072) <=> %(qvec)s::halfvec(3072)
     LIMIT 30
 ),
@@ -52,6 +53,7 @@ fulltext AS (
     WHERE release = %(release)s
       AND (%(service_filter)s::text IS NULL OR service = %(service_filter)s)
       AND (%(category_filter)s::text IS NULL OR category = %(category_filter)s)
+      AND (%(system_filter)s::text IS NULL OR system IN (%(system_filter)s, 'both'))
       AND tsv @@ q
     ORDER BY ts_rank_cd(tsv, q) DESC
     LIMIT 30
@@ -88,8 +90,13 @@ def _embed(text: str) -> list[float]:
 
 
 def hybrid_search(query: str, *, service: str | None = None,
-                  category: str | None = None, top_k: int = 20) -> list[dict]:
-    """Run hybrid search; returns list of chunk dicts ordered by RRF score."""
+                  category: str | None = None, top_k: int = 20,
+                  system: str | None = None) -> list[dict]:
+    """Run hybrid search; returns list of chunk dicts ordered by RRF score.
+
+    `system` filters by the chunk's database-system tag. `mssql` returns chunks
+    tagged 'mssql' OR 'both'; `postgres` returns 'postgres' OR 'both'. None
+    skips the filter entirely (returns everything)."""
     s = get_settings()
     qvec = _embed(query)
     params = {
@@ -98,6 +105,7 @@ def hybrid_search(query: str, *, service: str | None = None,
         "release": s.sherlock_release,
         "service_filter": service,
         "category_filter": category,
+        "system_filter": system,
         "top_k": top_k,
     }
     with psycopg.connect(s.database_url) as conn:
@@ -136,12 +144,16 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     if name != "search":
         return [TextContent(type="text", text=f"unknown tool: {name}")]
+    # When called from the RCA agent, the active_system contextvar drives the
+    # filter implicitly so the agent doesn't need to thread it through args.
+    from apps.api.env_context import active_system
     try:
         results = hybrid_search(
             arguments["query"],
             service=arguments.get("service"),
             category=arguments.get("category"),
             top_k=arguments.get("top_k", 20),
+            system=arguments.get("system") or active_system.get() or None,
         )
         return [TextContent(type="text", text=json.dumps(results, default=str, indent=2))]
     except Exception as e:

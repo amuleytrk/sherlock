@@ -60,8 +60,9 @@ async def run_discovery(message: str, *, top_k: int = 20) -> AsyncIterator[str]:
     yield sse("status", {"phase": "retrieving", "msg": "Searching corpus…"})
 
     try:
+        from apps.api.env_context import active_system
         from mcp_servers.sherlock_rag.server import hybrid_search
-        chunks = hybrid_search(message, top_k=top_k)
+        chunks = hybrid_search(message, top_k=top_k, system=active_system.get() or None)
     except Exception as e:
         yield sse("status", {"phase": "error", "msg": f"retrieval failed: {type(e).__name__}: {e}"})
         yield sse("done", {})
@@ -90,6 +91,15 @@ async def run_discovery(message: str, *, top_k: int = 20) -> AsyncIterator[str]:
 
     yield sse("status", {"phase": "generating", "msg": "Composing grounded answer…"})
 
+    db_system = active_system.get() or "mssql"
+    user_preamble = (
+        f"<context>\n"
+        f"db_system: {db_system}  # corpus is pre-filtered to this DB era; "
+        f"discuss only {db_system}-relevant tables/queries. Do not mention "
+        f"the other system as an alternative unless the user explicitly asks.\n"
+        f"</context>\n\n"
+    )
+
     client = Anthropic(api_key=s.anthropic_api_key)
     with client.messages.stream(
         model="claude-sonnet-4-6",
@@ -102,7 +112,7 @@ async def run_discovery(message: str, *, top_k: int = 20) -> AsyncIterator[str]:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": f"<knowledge_base>\n{kb}\n</knowledge_base>"},
-                    {"type": "text", "text": message},
+                    {"type": "text", "text": user_preamble + message},
                 ],
             }
         ],

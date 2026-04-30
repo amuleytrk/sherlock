@@ -394,13 +394,18 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
 
     # Env preamble lives in the user message so the (cached) system prompt
     # stays identical across envs.
-    from apps.api.env_context import active_env
+    from apps.api.env_context import active_env, active_system
     cfg = s.env_config(active_env.get() or s.sherlock_default_env)
+    db_system = active_system.get() or "mssql"
     env_block = (
         "<env>\n"
         f"name: {cfg.env}\n"
         f"k8s_namespace: {cfg.k8s_namespace}\n"
         f"k8s_pod_suffix: {cfg.k8s_pod_suffix}\n"
+        f"db_system: {db_system}  # 'mssql' or 'postgres' — RAG retrieval is "
+        f"already scoped to this; use it to pick the right table names when "
+        f"calling trk_mssql_query / trk_cosmos_query. PG-only tables like "
+        f"trk.raw_device_event are off-limits when db_system=mssql.\n"
         "</env>\n\n"
     )
 

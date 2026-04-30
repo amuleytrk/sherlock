@@ -68,3 +68,9 @@ class EnvCreds:
 # Default is empty so a missing setter is a loud bug — settings.env_config()
 # falls back to `sherlock_default_env` when called without an explicit env.
 active_env: ContextVar[str] = ContextVar("active_env", default="")
+
+# Active database-system filter. Trackonomy is mid-migration MSSQL → PostgreSQL.
+# The corpus contains docs from both eras; this contextvar lets retrieval scope
+# to one system. Values: "mssql" | "postgres" | "" (no filter, return all).
+# Default empty so RCA tool calls work even if upstream forgets to set it.
+active_system: ContextVar[str] = ContextVar("active_system", default="")

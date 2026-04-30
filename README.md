@@ -180,6 +180,24 @@ The indexer hard-fails if any repo on disk is on a different branch than
 the one declared in `repos.yml` — preventing silent indexing of the wrong
 code.
 
+### MSSQL vs Postgres mode
+
+Trackonomy is mid-migration MSSQL → PostgreSQL, and the indexed corpus has
+docs from both eras. The top-right header has a small **MSSQL / Postgres**
+toggle that scopes RAG retrieval to one system, so e.g. an MSSQL-mode
+discovery query never surfaces PG-flavored tables like `trk.raw_device_event`.
+Selection persists to localStorage.
+
+How chunks get tagged:
+- Files under `~/plans/work/designs/postgres/**`, plus filenames matching
+  `postgresql*`, `postgresDeviceMgmt*`, `pgSystem*`, `dataMigrationPg.md` →
+  tagged `postgres`.
+- Everything else (general design docs, service code) → tagged `both`.
+
+The filter rule: `mssql` mode returns chunks where `system IN ('mssql', 'both')`;
+`postgres` mode returns `('postgres', 'both')`. So general docs and shared
+service code show up in both modes — only system-era-specific docs are gated.
+
 ### Multi-env setup
 
 Sherlock can target multiple deployment environments. Switch via the

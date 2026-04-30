@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from apps.api import audit, demo, store
 from apps.api.agents.discovery import run_discovery
 from apps.api.agents.rca import run_rca
-from apps.api.env_context import active_env
+from apps.api.env_context import active_env, active_system
 from apps.api.router import classify
 from apps.api.settings import get_settings
 from apps.api.sse import sse
@@ -86,6 +86,12 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     env: str | None = None
+    # 'mssql' | 'postgres' — scopes RAG retrieval to one DB era. None = no
+    # filter (legacy behavior, returns from both buckets).
+    system: str | None = None
+
+
+_VALID_SYSTEMS = {"mssql", "postgres"}
 
 
 async def _dispatch(req: ChatRequest):
@@ -154,6 +160,14 @@ async def _record_session(req: ChatRequest):
         requested_env = s.sherlock_default_env.lower()
     active_env.set(requested_env)
 
+    # Active DB system filter for RAG retrieval. Defaults to mssql (current
+    # production reality at Trackonomy); flip to postgres via the dropdown
+    # once the migration ships.
+    requested_system = (req.system or "mssql").lower()
+    if requested_system not in _VALID_SYSTEMS:
+        requested_system = "mssql"
+    active_system.set(requested_system)
+
     session_id = req.session_id
     is_new = not session_id
     if is_new:
@@ -166,7 +180,10 @@ async def _record_session(req: ChatRequest):
         store.upsert_session(session_id)
     store.append_message(session_id, role="user", content=req.message)
 
-    yield sse("session", {"id": session_id, "is_new": is_new, "env": requested_env})
+    yield sse(
+        "session",
+        {"id": session_id, "is_new": is_new, "env": requested_env, "system": requested_system},
+    )
 
     answer_chunks: list[str] = []
     final_answer: str | None = None

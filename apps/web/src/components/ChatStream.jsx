@@ -7,7 +7,7 @@ import RcaReport from "./RcaReport.jsx";
 import ThinkingIndicator from "./ThinkingIndicator.jsx";
 import ToolCallStatus from "./ToolCallStatus.jsx";
 
-export default function ChatStream({ session, env, onTurnComplete }) {
+export default function ChatStream({ session, env, system, onTurnComplete }) {
   const [messages, setMessages] = useState(session?.messages ?? []);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,6 +46,7 @@ export default function ChatStream({ session, env, onTurnComplete }) {
         message: text,
         sessionId: sessionIdRef.current,
         env: env || null,
+        system: system || null,
         signal: abortRef.current.signal,
         onEvent(name, data) {
           if (name === "session" && data?.id) {

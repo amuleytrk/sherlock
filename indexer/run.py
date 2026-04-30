@@ -49,6 +49,30 @@ def _service_for(path: Path, repos_root: Path) -> str:
     return repo
 
 
+def _system_for(path: Path) -> str:
+    """Tag a chunk as 'mssql' / 'postgres' / 'both' based on path heuristics.
+
+    Trackonomy is mid-migration MSSQL → PostgreSQL. The corpus has docs from
+    both eras; the UI's system dropdown filters retrieval to one of them so
+    e.g. an MSSQL-mode discovery query never surfaces PG-flavored table names.
+
+    Heuristic: explicit postgres-marked paths → 'postgres'. Everything else →
+    'both' (most code and design docs work for either DB era — the read-side
+    differences live in a small set of identifiable files)."""
+    p = str(path).lower()
+    if "/designs/postgres/" in p:
+        return "postgres"
+    name = path.name.lower()
+    if (
+        "postgresql" in name
+        or "postgresdevicemgmt" in name
+        or name.startswith("pgsystem")
+        or name == "datamigrationpg.md"
+    ):
+        return "postgres"
+    return "both"
+
+
 def _validate_repos_on_correct_branches(repos_root: Path) -> None:
     """Before indexing, fail loudly if any repo isn't on the branch declared
     in repos.yml. Prevents silently indexing the wrong code (e.g. a feature
@@ -92,12 +116,13 @@ def index_path(path: Path, release: str, repos_root: Path) -> int:
     if cat is None:
         return 0
     service = _service_for(path, repos_root)
+    system = _system_for(path)
 
     text = path.read_text(encoding="utf-8", errors="ignore")
 
     if path.suffix == ".md":
         blocks = parse_markdown(text, file_path=str(path))
-        chunks = chunk_markdown(blocks, release=release, service=service, category=cat)
+        chunks = chunk_markdown(blocks, release=release, service=service, category=cat, system=system)
     elif path.suffix in {".js", ".jsx", ".ts", ".tsx"}:
         # Code parser lands in Day 2 (parse_code.py). Until then, skip code files.
         try:
@@ -105,7 +130,7 @@ def index_path(path: Path, release: str, repos_root: Path) -> int:
         except ImportError:
             return 0
         blocks = parse_code_file(path)
-        chunks = chunk_code(blocks, release=release, service=service, category=cat)
+        chunks = chunk_code(blocks, release=release, service=service, category=cat, system=system)
     else:
         return 0
 

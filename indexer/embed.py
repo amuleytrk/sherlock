@@ -34,13 +34,13 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
 
 UPSERT_SQL = """
 INSERT INTO vector_store.chunks (
-    chunk_id, release, service, category, file_path,
+    chunk_id, release, service, category, system, file_path,
     line_start, line_end, heading_hierarchy,
     http_method, endpoint_path, middleware,
     context, content, embedding, parent_id, last_modified
 )
 VALUES (
-    %(chunk_id)s, %(release)s, %(service)s, %(category)s, %(file_path)s,
+    %(chunk_id)s, %(release)s, %(service)s, %(category)s, %(system)s, %(file_path)s,
     %(line_start)s, %(line_end)s, %(heading_hierarchy)s,
     %(http_method)s, %(endpoint_path)s, %(middleware)s,
     %(context)s, %(content)s, %(embedding)s, %(parent_id)s, NOW()
@@ -49,6 +49,7 @@ ON CONFLICT (chunk_id) DO UPDATE SET
     release = EXCLUDED.release,
     service = EXCLUDED.service,
     category = EXCLUDED.category,
+    system = EXCLUDED.system,
     file_path = EXCLUDED.file_path,
     line_start = EXCLUDED.line_start,
     line_end = EXCLUDED.line_end,
@@ -84,6 +85,7 @@ def upsert_chunks(chunks: Iterable[Chunk], verbose: bool = True) -> int:
                             "release": c.release,
                             "service": c.service,
                             "category": c.category,
+                            "system": c.system,
                             "file_path": c.file_path,
                             "line_start": c.line_start,
                             "line_end": c.line_end,

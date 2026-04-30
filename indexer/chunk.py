@@ -30,6 +30,9 @@ class Chunk:
     content: str
     token_count: int
     parent_id: str | None = None
+    # 'mssql' | 'postgres' | 'both'. Drives the UI's MSSQL/Postgres dropdown
+    # so retrieval can scope to one DB era.
+    system: str = "both"
 
 
 def chunk_id_for(file_path: str, line_start: int, line_end: int, release: str) -> str:
@@ -43,6 +46,7 @@ def chunk_markdown(
     service: str = "platform",
     category: str = "architecture",
     max_tokens: int = 1000,
+    system: str = "both",
 ) -> list[Chunk]:
     by_heading_path: dict[tuple[str, ...], str] = {}
     out: list[Chunk] = []
@@ -69,10 +73,11 @@ def chunk_markdown(
                     content=b.content,
                     token_count=len(token_ids),
                     parent_id=parent_id,
+                    system=system,
                 )
             ]
         else:
-            chunks_for_block = _split_oversized(b, release, service, category, max_tokens, parent_id)
+            chunks_for_block = _split_oversized(b, release, service, category, max_tokens, parent_id, system)
 
         out.extend(chunks_for_block)
         # Record the first chunk's id under this heading path for child lookups
@@ -88,6 +93,7 @@ def _split_oversized(
     category: str,
     max_tokens: int,
     parent_id: str | None,
+    system: str = "both",
 ) -> list[Chunk]:
     parts = b.content.split("\n\n")
     out: list[Chunk] = []
@@ -115,6 +121,7 @@ def _split_oversized(
                 content=text,
                 token_count=buf_tokens,
                 parent_id=parent_id,
+                system=system,
             )
         )
         line_cursor = line_end + 1
@@ -161,6 +168,7 @@ def chunk_code(
     service: str,
     category: str,
     max_tokens: int = 1200,
+    system: str = "both",
 ) -> list[Chunk]:
     """Convert parse_code.CodeBlock instances into Chunks (one per method/function)."""
     out: list[Chunk] = []
@@ -189,6 +197,7 @@ def chunk_code(
                 content=content,
                 token_count=tc,
                 parent_id=None,
+                system=system,
             )
         )
     return out
