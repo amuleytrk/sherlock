@@ -1,16 +1,26 @@
-# React + Vite
+# Sherlock — web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + Vite + Tailwind frontend for Sherlock. Dark "Technical Precision" theme.
 
-Currently, two official plugins are available:
+The build is launched alongside the FastAPI backend by `./scripts/start_dev.sh`
+from the repo root. Vite proxies `/api/*` to `http://localhost:8000`. See the
+top-level [`README.md`](../../README.md) for the full setup.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Components
 
-## React Compiler
+- `App.jsx` — top-level layout, mode tabs (Chat / Briefings / Trace), env + system switchers
+- `components/ChatStream.jsx` — Discovery + RCA chat surface, SSE event timeline
+- `components/BriefingsPane.jsx` — proactive-mode dashboard
+- `components/TracePane.jsx` — cross-service trace UI with Mermaid sequence diagrams
+- `components/ConfidenceBadge.jsx` — trust-layer self-graded confidence display
+- `components/EnvSwitcher.jsx` / `SystemSwitcher.jsx` — env (PPE / Stage) and DB-system (MSSQL / Postgres) selectors
+- `components/HistorySidebar.jsx` — session history with cascade-delete
+- `lib/sse.js` / `lib/api.js` — SSE streaming + REST clients
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Local dev
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev      # standalone Vite (rare — usually use scripts/start_dev.sh)
+npm run build    # production bundle
+```

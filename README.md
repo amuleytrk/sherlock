@@ -48,13 +48,12 @@ Submission artifacts live under `~/plans/work/designs/rca-tool/submission/`:
 🚧 Under active development. Submission deadline: **April 30, 2026 EOD**.
 Town Hall demo: **May 2026** (top-5 finalists, 5-min live demo).
 
-The full implementation plan (5 days, task-by-task with code) lives in the
-author's Obsidian work vault at
-`~/plans/work/designs/rca-tool/implementation/`. Companion specs:
-`sherlock-design.md` (architecture), `2026-04-25-brainstorm-log.md`
-(decision log), `autonomous-execution-log.md` (overnight build log).
-
-If you're picking this up cold, read [`WAKE_UP_NOTES.md`](./WAKE_UP_NOTES.md) first.
+The full design specification + implementation plan + decision log
+live in the author's Obsidian work vault at
+`~/plans/work/designs/rca-tool/`. Companion specs:
+`sherlock-design.md` (architecture), `submission/SUBMISSION.md` (entry
+text), `submission/IMPACT.md` (financial brief), `submission/DEMO_SLIDES.md`
+(5-min Town Hall script).
 
 ---
 
@@ -330,13 +329,13 @@ echo 'SHERLOCK_DEMO_MODE=1' >> .env
 # open http://localhost:5173
 ```
 
-Demo mode streams canned-but-realistic agent traces for marquee queries
-(see [`WAKE_UP_NOTES.md`](./WAKE_UP_NOTES.md)). Useful for the live demo
-or for screenshots; turn it off (`SHERLOCK_DEMO_MODE=0`) for real
-investigations.
+Demo mode streams canned-but-realistic agent traces for marquee queries.
+Useful for screenshots; turn it off (`SHERLOCK_DEMO_MODE=0`) for real
+investigations against live PPE/Stage infrastructure.
 
 ---
 
 ## License
 
-Internal — Trackonomy Systems only.
+See [`LICENSE`](./LICENSE) (Apache 2.0). Submitted to the Trackonomy Builder
+Challenge — April 2026.

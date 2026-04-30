@@ -498,9 +498,19 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
                             f"produced files:\n{files_str}"
                         )
                     elif block.name == "write_final_rca":
-                        inv.write_final_rca(block.input["markdown"])
-                        out_text = f"final-rca.md written ({len(block.input['markdown'])} chars)"
-                        final_rca_written = True
+                        md = (block.input or {}).get("markdown") or ""
+                        if md.strip():
+                            inv.write_final_rca(md)
+                            out_text = f"final-rca.md written ({len(md)} chars)"
+                            final_rca_written = True
+                        else:
+                            # Model called the tool but didn't fill `markdown`.
+                            # Don't crash — push it back to fix the call.
+                            out_text = (
+                                "ERROR: write_final_rca was called with an empty or missing "
+                                "`markdown` field. Re-call write_final_rca with the FULL RCA "
+                                "report as the `markdown` argument."
+                            )
                     elif block.name == "Task":
                         if subagents_dispatched >= MAX_SUBAGENTS:
                             out_text = f"max sub-agents ({MAX_SUBAGENTS}) reached; do not call Task again"
@@ -575,11 +585,56 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
             )
             for b in resp.content:
                 if b.type == "tool_use" and b.name == "write_final_rca":
-                    inv.write_final_rca(b.input["markdown"])
-                    final_rca_written = True
+                    md = (b.input or {}).get("markdown") or ""
+                    if md.strip():
+                        inv.write_final_rca(md)
+                        final_rca_written = True
                 if b.type == "text":
                     opus_text_chunks.append(b.text)
                     yield sse("agent_text", {"text": b.text})
+
+            # If Opus called the tool with an empty/missing markdown OR didn't
+            # call it at all, give it ONE retry with a more directive prompt
+            # that includes the evidence summary. This catches the common
+            # failure where the model says "I have sufficient evidence" in
+            # text and then fires an empty tool_use.
+            if not final_rca_written:
+                ev_summary = "\n".join(
+                    f"  - {p.name}" for p in sorted(inv.list_evidence())[-12:]
+                )
+                history.append(
+                    {"role": "assistant", "content": _content_to_history_block(resp.content)}
+                )
+                history.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            "You did NOT successfully call write_final_rca. The required "
+                            "`markdown` argument was missing or empty. Call it ONCE more, "
+                            "right now, with the complete RCA writeup as the `markdown` "
+                            "string — do not respond with any text, only the tool call. "
+                            f"Recent evidence files (in your scratch dir):\n{ev_summary}"
+                        ),
+                    }
+                )
+                try:
+                    retry = client.messages.create(
+                        model="claude-opus-4-7",
+                        max_tokens=4000,
+                        system=[{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}],
+                        tools=_tool_definitions(),
+                        messages=history,
+                    )
+                    for b in retry.content:
+                        if b.type == "tool_use" and b.name == "write_final_rca":
+                            md = (b.input or {}).get("markdown") or ""
+                            if md.strip():
+                                inv.write_final_rca(md)
+                                final_rca_written = True
+                        if b.type == "text":
+                            opus_text_chunks.append(b.text)
+                except Exception as e2:
+                    opus_error = f"retry {type(e2).__name__}: {e2}"
         except Exception as e:
             opus_error = f"{type(e).__name__}: {e}"
             yield sse(
