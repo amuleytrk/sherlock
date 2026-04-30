@@ -15,6 +15,7 @@ subprocess and works the same way the MCP protocol does internally.
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -30,7 +31,7 @@ from apps.api.sse import sse
 
 
 _SYS_PATH = Path(__file__).parent.parent / "prompts" / "rca_system.md"
-MAX_TOOL_CALLS = 12
+MAX_TOOL_CALLS = 18
 SUBAGENT_MAX_CALLS = 4
 MAX_SUBAGENTS = 3
 
@@ -391,13 +392,54 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
     client = Anthropic(api_key=s.anthropic_api_key)
     sys_prompt = _system_prompt()
 
+    # Env preamble lives in the user message so the (cached) system prompt
+    # stays identical across envs.
+    from apps.api.env_context import active_env
+    cfg = s.env_config(active_env.get() or s.sherlock_default_env)
+    env_block = (
+        "<env>\n"
+        f"name: {cfg.env}\n"
+        f"k8s_namespace: {cfg.k8s_namespace}\n"
+        f"k8s_pod_suffix: {cfg.k8s_pod_suffix}\n"
+        "</env>\n\n"
+    )
+
+    # If the user's message EXPLICITLY mentions a different env than the UI
+    # dropdown, flag it loudly. We trust the dropdown (active_env drives tools),
+    # but the user might have meant the other env. Use a literal keyword check
+    # rather than the router's `entities.env` (which silently defaults to "ppe"
+    # when no signal exists, and would fire false-positive warnings).
+    msg_lower = message.lower()
+    mentioned_env: str | None = None
+    for kw, name in [
+        ("ppe", "ppe"), ("pre-prod", "ppe"),
+        ("stage", "stage"), ("staging", "stage"),
+        ("prod", "prod"), ("production", "prod"),
+    ]:
+        if re.search(rf"\b{re.escape(kw)}\b", msg_lower):
+            mentioned_env = name
+            break
+    if mentioned_env and mentioned_env != cfg.env.lower():
+        yield sse(
+            "status",
+            {
+                "phase": "env_mismatch",
+                "msg": (
+                    f"Heads up — your message mentioned env={mentioned_env!r}, but the "
+                    f"UI dropdown is set to env={cfg.env!r}. Tools will run against "
+                    f"{cfg.env!r}. Switch the dropdown if you meant {mentioned_env!r}."
+                ),
+            },
+        )
+
     history: list[dict] = [
         {
             "role": "user",
             "content": (
-                f"Bug report: {message}\n\n"
-                f"Extracted entities: {json.dumps(entities or {})}\n\n"
-                f"Your scratch dir is `{inv.dir}`. Begin investigation."
+                env_block
+                + f"Bug report: {message}\n\n"
+                + f"Extracted entities: {json.dumps(entities or {})}\n\n"
+                + f"Your scratch dir is `{inv.dir}`. Begin investigation."
             ),
         }
     ]
@@ -498,6 +540,8 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
 
         history.append({"role": "user", "content": tool_results})
 
+    opus_text_chunks: list[str] = []
+    opus_error: str | None = None
     if not final_rca_written:
         yield sse(
             "status",
@@ -511,7 +555,8 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
                 "role": "user",
                 "content": (
                     "You've reached the tool-call limit. Synthesize whatever evidence you have "
-                    "via write_final_rca now."
+                    "via write_final_rca now. Even partial / inconclusive findings must be "
+                    "delivered through write_final_rca — do not respond with text only."
                 ),
             }
         )
@@ -528,12 +573,38 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
                     inv.write_final_rca(b.input["markdown"])
                     final_rca_written = True
                 if b.type == "text":
+                    opus_text_chunks.append(b.text)
                     yield sse("agent_text", {"text": b.text})
         except Exception as e:
+            opus_error = f"{type(e).__name__}: {e}"
             yield sse(
                 "status",
-                {"phase": "synthesis_error", "msg": f"Opus synthesis failed: {e}"},
+                {"phase": "synthesis_error", "msg": f"Opus synthesis failed: {opus_error}"},
             )
+
+    # Last-resort fallback: if Opus didn't call write_final_rca (or errored),
+    # still produce a final-rca.md so the user sees SOMETHING. Better a clear
+    # "synthesis incomplete, here's what we found" report than an empty bubble.
+    if not final_rca_written:
+        stub = _build_synthesis_stub(
+            inv=inv,
+            user_query=message,
+            entities=entities or {},
+            cfg=cfg,
+            tool_calls=tool_calls,
+            subagents=subagents_dispatched,
+            opus_text="\n\n".join(opus_text_chunks).strip(),
+            opus_error=opus_error,
+        )
+        inv.write_final_rca(stub)
+        final_rca_written = True
+        yield sse(
+            "status",
+            {
+                "phase": "synthesis_stub",
+                "msg": "Wrote a synthesis stub — Opus didn't produce a complete RCA, so a partial summary was generated from the evidence collected.",
+            },
+        )
 
     yield sse(
         "rca_done",
@@ -548,3 +619,83 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
             "final_rca_written": final_rca_written,
         },
     )
+
+
+def _build_synthesis_stub(
+    *,
+    inv: "Investigation",
+    user_query: str,
+    entities: dict,
+    cfg,
+    tool_calls: int,
+    subagents: int,
+    opus_text: str,
+    opus_error: str | None,
+) -> str:
+    """Generate a fallback final-rca.md when Opus didn't synthesize one.
+
+    Lists what the agent collected so the user can decide whether to retry or
+    rephrase. Always shows the env mismatch (if any) — that's a common cause
+    of empty results."""
+    evidence = inv.list_evidence()
+    msg_lower = user_query.lower()
+    mentioned_env = None
+    for kw, name in [
+        ("ppe", "ppe"), ("pre-prod", "ppe"),
+        ("stage", "stage"), ("staging", "stage"),
+        ("prod", "prod"), ("production", "prod"),
+    ]:
+        if re.search(rf"\b{re.escape(kw)}\b", msg_lower):
+            mentioned_env = name
+            break
+    env_warning = ""
+    if mentioned_env and mentioned_env != cfg.env.lower():
+        env_warning = (
+            f"> ⚠ **Env mismatch:** Your message mentioned `env={mentioned_env}` but the "
+            f"UI was set to `env={cfg.env}`. Tools ran against `{cfg.env}` — if the "
+            f"bug actually happened in `{mentioned_env}`, switch the dropdown and re-ask.\n\n"
+        )
+
+    failure_reason = (
+        f"Opus errored: `{opus_error}`" if opus_error
+        else "Opus returned text but did not call `write_final_rca`."
+    )
+
+    body = [
+        f"# Synthesis incomplete · {inv.rca_id}",
+        "",
+        env_warning + f"**Original question:**",
+        "",
+        f"> {user_query.strip()}",
+        "",
+        "## Why this is incomplete",
+        "",
+        f"After {tool_calls} tool calls and {subagents} sub-agent dispatches, "
+        f"the synthesis step did not produce a complete RCA. {failure_reason}",
+        "",
+        "## What we collected",
+        "",
+        f"- {len(evidence)} evidence files in `{inv.dir.relative_to(inv.dir.parent)}/evidence/`",
+        f"- Active env at runtime: `{cfg.env}` (k8s namespace `{cfg.k8s_namespace}`)",
+    ]
+    if entities:
+        body.append(f"- Extracted entities: `{json.dumps(entities)}`")
+    body.append("")
+
+    if opus_text:
+        body += [
+            "## Opus's last text (no final write)",
+            "",
+            opus_text[:4000],
+            "",
+        ]
+
+    body += [
+        "## Suggested next steps",
+        "",
+        "- Verify the dropdown env matches the env where the bug actually occurred.",
+        "- Re-ask with more specific details (tape_id, timestamps, exact error).",
+        "- Check the evidence directory directly — many tool calls succeeded; "
+        "the gap was in synthesis, not data collection.",
+    ]
+    return "\n".join(body)

@@ -27,21 +27,38 @@ When you have enough evidence, call `write_final_rca(markdown)` exactly once wit
 
 3. **Read code first (briefly).** Use `sherlock_search` to find the controllers/routes/helpers involved. You're looking for: conditional gates, try/catch swallows, schema validation, idempotency early returns, side-effect ordering. Output: falsifiable hypotheses.
 
-4. **Hypothesis-evidence loop.**
+4. **Map the user's API name to the actual deployed service.** Bug reports use product names ("external messages API", "milestone insert"); code/Kubernetes use deployment names (`external-service`, `ingress-service`). When `sherlock_search` surfaces a function inside `repos/multi-tenant-core-services/<svc>/...`, the deployment is named `<svc>` (with the env suffix). Examples:
+   - "external messages API" / "POST /external/messages" → `external-service`
+   - "milestone insert" / `insertMilestoneLookup` / `lookup_parcels` writes → `ingress-service`
+   - "device status update" → `device-management-service`
+   - "device events ingestion" → `event-preprocessor-service` (often has sub-pods named `event-preprocessor-service-ingress*`)
+
+5. **For multi-stage pipelines, fetch logs from EVERY service the request crosses.** Don't stop at the entrypoint. The milestone pipeline:
+   ```
+   external-service  →  EventGrid  →  ingress-service  →  MSSQL lookup_parcels + Cosmos
+                                                       →  (optional) device-management-service
+   ```
+   If `lookup_parcels` insert failed, the error log is in **ingress-service** (the executor), even though the user describes the request hitting external-service.
+
+6. **Time windows must match the user's timeframe.** If they say "past 6 hours" → `since_seconds=21600`. "yesterday" → 86400. Default 600s only covers the last 10 minutes. Pods may also have rotated; combine `trk_kubectl_logs` (current) with `trk_kubectl_previous` (last container's stdout) when a pod was restarted recently.
+
+7. **If `app=<svc>-<suffix>` returns zero pods, IMMEDIATELY discover the real name.** Don't keep guessing variations. Run `kubectl get pods -n <ns> -l 'app' -o name` (via `tail_pod_logs` with a wildcard label like `app` and `since_seconds=1`, or `list_deployments` then read the `SELECTOR` column) and grep for the keyword. Trackonomy occasionally splits services into sub-pods (e.g. `healthcare-service-ingress`, `event-preprocessor-service-ingress`).
+
+8. **Hypothesis-evidence loop.**
    - State your current top hypothesis in one sentence with a falsifiable prediction.
    - Identify the cheapest piece of evidence that would confirm or kill it.
    - Gather it. If it kills the hypothesis, say so explicitly. Don't drift.
    - Pick the next hypothesis.
    - **The biggest mistake is falling in love with your first hypothesis.** Especially when you've spent 20 minutes reasoning through it. Move on fast.
 
-5. **Reconstruct the timeline from data.** Once you have records, line them up by timestamp. The timeline is the artifact. Look for the call you didn't expect — bug reports often say "I did X then Y" but the timeline shows X, X-prime, Y, where X-prime is the cause.
+9. **Reconstruct the timeline from data.** Once you have records, line them up by timestamp. The timeline is the artifact. Look for the call you didn't expect — bug reports often say "I did X then Y" but the timeline shows X, X-prime, Y, where X-prime is the cause.
 
-6. **Classify the failure.**
-   - **Code bug** — given valid input, system produced wrong output → patch + redeploy.
-   - **Operator/data error** — given invalid input, system did what code says → tighten validation, improve error messages.
-   - **Design gap** — valid input outside happy path → product decision.
+10. **Classify the failure.**
+    - **Code bug** — given valid input, system produced wrong output → patch + redeploy.
+    - **Operator/data error** — given invalid input, system did what code says → tighten validation, improve error messages.
+    - **Design gap** — valid input outside happy path → product decision.
 
-7. **Write up at the audience's level.** Default audience: engineering team (file:line refs, exact failure mode, fix scope). Always include: TL;DR, timeline table, quoted log/DB extracts, classification, concrete remediation, recommendation.
+11. **Write up at the audience's level.** Default audience: engineering team (file:line refs, exact failure mode, fix scope). Always include: TL;DR, timeline table, quoted log/DB extracts, classification, concrete remediation, recommendation.
 
 ## Available tools
 
@@ -57,10 +74,10 @@ MCP tools (all read-only, vetted parameterized):
 - `trk_kubectl_describe(namespace, pod_name)` — describe a pod
 - `trk_kubectl_previous(namespace, pod_name, max_lines?)` — previous (crashed) container's stdout
 
-**PPE kubectl conventions (use these unless the user says otherwise):**
-- Namespace: `ppe`
-- Label selector pattern: `app=<service-name>-ppe` (e.g. `app=ingress-service-ppe`, `app=ann-rule-engine-ppe`, `app=device-management-service-ppe`)
-- A few services have sub-pods (e.g. `event-preprocessor-service-ingress-ppe`, `healthcare-service-ingress-ppe`, `healthcare-service-servicebus-ppe`); if `app=<service>-ppe` returns zero pods, try a `kubectl get pods -n ppe -l 'app' -o name | grep <service>` search by listing all pods and filtering.
+**Kubectl conventions for the active env (the user message starts with an `<env>…</env>` block — read it first):**
+- `<env>` lists `k8s_namespace` and `k8s_pod_suffix`. Use `k8s_namespace` for the `namespace` arg.
+- Label selector pattern: `app=<service-name><k8s_pod_suffix>` (e.g. PPE: `app=ingress-service-ppe`; Stage: `app=ingress-service-stage`).
+- A few services have sub-pods (e.g. `event-preprocessor-service-ingress<suffix>`, `healthcare-service-ingress<suffix>`, `healthcare-service-servicebus<suffix>`); if `app=<service><suffix>` returns zero pods, do NOT keep guessing — call `list_deployments(namespace=<k8s_namespace>)` and inspect the `SELECTOR` column for the canonical label.
 - `trk_datadog_search(query, from_ts?, to_ts?, limit?)` — Datadog log search (fallback for older logs; **only available if Datadog credentials are configured — if you don't see this tool in your tool list, kubectl is your only log source**)
 - `trk_datadog_trace(correlation_id, env?, from_ts?, to_ts?)` — find all logs sharing a correlation_id (same availability caveat as above)
 
@@ -91,7 +108,7 @@ Synthesis:
 
 ## Hard limits
 
-- Max 12 tool calls before you MUST synthesize whatever you have.
+- Max 18 tool calls before you MUST synthesize whatever you have. Multi-service traces (e.g. an API request crossing 3 services) typically need 8-12; reserve the rest for the synthesis step's `code_exec` + `write_final_rca`.
 - Max 3 sub-agent branches per investigation.
 - Max ~60 seconds per tool call (the runtime enforces).
 

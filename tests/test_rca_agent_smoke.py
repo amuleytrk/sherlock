@@ -61,7 +61,7 @@ def test_datadog_tools_hidden_when_only_one_key_present(monkeypatch):
 
 
 def test_caps_are_sane():
-    assert 8 <= MAX_TOOL_CALLS <= 16
+    assert 8 <= MAX_TOOL_CALLS <= 24
     assert 2 <= SUBAGENT_MAX_CALLS <= 6
     assert 1 <= MAX_SUBAGENTS <= 5
 

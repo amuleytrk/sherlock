@@ -1,8 +1,8 @@
 """trk-redis MCP server.
 
-Read-only key lookups against PPE Redis. Only the operations GET / HGETALL /
-EXISTS / ZSCORE are exposed via predefined key patterns — no arbitrary
-commands accepted.
+Read-only key lookups against the active env's Azure Redis Cache. Only the
+operations GET / HGETALL / EXISTS / ZSCORE are exposed via predefined key
+patterns — no arbitrary commands accepted.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from typing import Any
 
 import redis
 
+from apps.api.env_context import EnvCreds, active_env
 from apps.api.settings import get_settings
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -55,14 +56,19 @@ KEY_PATTERNS: dict[str, dict] = {
 }
 
 
-def _client():
-    """Build a read-side Redis client.
+def _current_cfg() -> EnvCreds:
+    s = get_settings()
+    return s.env_config(active_env.get() or s.sherlock_default_env)
+
+
+def _client(cfg: EnvCreds):
+    """Build a read-side Redis client for the active env.
 
     Two configuration shapes are accepted:
-    1. `REDIS_PPE_HOST` + `REDIS_PPE_PORT` + `REDIS_PPE_KEY` (preferred — matches
-       how Trackonomy backend services configure Redis; avoids URL-encoding
-       headaches with passwords that contain `+`, `/`, `=`).
-    2. `REDIS_PPE_URL` (single connection string, e.g. `rediss://:KEY@host:port`).
+    1. `REDIS_<ENV>_HOST` + `_PORT` + `_KEY` (preferred — matches how Trackonomy
+       backend services configure Redis; avoids URL-encoding headaches with
+       passwords that contain `+`, `/`, `=`).
+    2. `REDIS_<ENV>_URL` (single connection string, e.g. `rediss://:KEY@host:port`).
 
     If both are set, the host/port/key triplet wins.
 
@@ -71,32 +77,30 @@ def _client():
     with "unable to get local issuer certificate" against Azure Redis.
     """
     import certifi
-    s = get_settings()
-    if s.redis_ppe_host and s.redis_ppe_key:
+    if cfg.redis_host and cfg.redis_key:
         kwargs = {
-            "host": s.redis_ppe_host,
-            "port": s.redis_ppe_port,
-            "password": s.redis_ppe_key,
+            "host": cfg.redis_host,
+            "port": cfg.redis_port,
+            "password": cfg.redis_key,
             "decode_responses": True,
             "socket_timeout": 5,
             "socket_connect_timeout": 5,
         }
-        if s.redis_ppe_tls:
+        if cfg.redis_tls:
             kwargs["ssl"] = True
             kwargs["ssl_ca_certs"] = certifi.where()
         return redis.Redis(**kwargs)
-    if s.redis_ppe_url:
-        # Same CA bundle path for URL-form connections that use rediss://.
-        if s.redis_ppe_url.startswith("rediss://"):
+    if cfg.redis_url:
+        if cfg.redis_url.startswith("rediss://"):
             return redis.from_url(
-                s.redis_ppe_url,
+                cfg.redis_url,
                 decode_responses=True,
                 ssl_ca_certs=certifi.where(),
             )
-        return redis.from_url(s.redis_ppe_url, decode_responses=True)
+        return redis.from_url(cfg.redis_url, decode_responses=True)
     raise RuntimeError(
-        "Redis not configured: set either REDIS_PPE_HOST + REDIS_PPE_PORT + "
-        "REDIS_PPE_KEY (preferred), or REDIS_PPE_URL"
+        f"Redis not configured for env={cfg.env!r}: set "
+        f"REDIS_{cfg.env.upper()}_HOST + _PORT + _KEY (preferred), or REDIS_{cfg.env.upper()}_URL"
     )
 
 
@@ -138,11 +142,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     if name != "redis_get":
         return [TextContent(type="text", text=f"unknown tool: {name}")]
 
-    s = get_settings()
-    if not (s.redis_ppe_url or (s.redis_ppe_host and s.redis_ppe_key)):
+    cfg = _current_cfg()
+    if not (cfg.redis_url or (cfg.redis_host and cfg.redis_key)):
         return [TextContent(
             type="text",
-            text="redis not configured (set REDIS_PPE_HOST + REDIS_PPE_PORT + REDIS_PPE_KEY, or REDIS_PPE_URL)"
+            text=(
+                f"redis not configured for env={cfg.env!r} — set "
+                f"REDIS_{cfg.env.upper()}_HOST + _PORT + _KEY, or REDIS_{cfg.env.upper()}_URL"
+            ),
         )]
 
     kt = arguments.get("key_type")
@@ -157,7 +164,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
 
     op = spec["op"]
     try:
-        client = _client()
+        client = _client(cfg)
         if op == "GET":
             val = client.get(key)
         elif op == "HGETALL":

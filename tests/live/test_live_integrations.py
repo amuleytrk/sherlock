@@ -82,10 +82,13 @@ def test_live_anthropic_router():
 
 @pytest.mark.live
 def test_live_mssql_smoke():
+    """Smoke-test MSSQL for the default env (typically PPE)."""
     skip = _missing_env("MSSQL_PPE_USER", "MSSQL_PPE_PASSWORD")
     if skip:
         pytest.skip(skip)
+    from apps.api.env_context import active_env
     from mcp_servers.trk_mssql.server import _connect
+    active_env.set("ppe")
     with _connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT TOP 1 1 AS one FROM trk.tapecfg_db")
@@ -98,10 +101,10 @@ def test_live_cosmos_smoke():
     skip = _missing_env("COSMOS_PPE_ENDPOINT", "COSMOS_PPE_KEY", "COSMOS_PPE_DATABASE")
     if skip:
         pytest.skip(skip)
-    from mcp_servers.trk_cosmos.server import _client
     from apps.api.settings import get_settings
-    s = get_settings()
-    db = _client().get_database_client(s.cosmos_ppe_database)
+    from mcp_servers.trk_cosmos.server import _client
+    cfg = get_settings().env_config("ppe")
+    db = _client(cfg).get_database_client(cfg.cosmos_database)
     container = db.get_container_client("consumables")
     items = list(container.query_items(
         query="SELECT TOP 1 c.id FROM c",
@@ -116,16 +119,22 @@ def test_live_redis_smoke():
     skip = _missing_env("REDIS_PPE_URL")
     if skip:
         pytest.skip(skip)
+    from apps.api.settings import get_settings
     from mcp_servers.trk_redis.server import _client
-    client = _client()
+    cfg = get_settings().env_config("ppe")
+    client = _client(cfg)
     assert client.ping() is True
 
 
 @pytest.mark.live
 def test_live_kubectl_smoke():
-    """Verify kubectl is configured and can list pods in the platform namespace.
-    Adjust the namespace to whatever PPE uses."""
+    """Verify kubectl is configured for the default (PPE) env."""
+    skip = _missing_env("KUBECONFIG_PPE")
+    if skip:
+        pytest.skip(skip)
+    from apps.api.env_context import active_env
     from mcp_servers.trk_kubectl.server import _run_kubectl
+    active_env.set("ppe")
     rc, out, err = _run_kubectl(["version", "--client", "-o", "json"], timeout=10)
     if rc != 0:
         pytest.skip(f"kubectl client check failed: {err}")

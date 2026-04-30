@@ -6,6 +6,7 @@ payload (the `data:` line). The frontend's ChatStream component dispatches
 on the event name.
 
 Event names emitted across the codebase:
+    session        — session ID stamp (always first; tells client which session this turn belongs to)
     router         — routing decision, with extracted entities
     status         — phase transitions ("retrieving", "generating", etc.)
     evidence       — structured tool output for inline rendering (citation_list, etc.)

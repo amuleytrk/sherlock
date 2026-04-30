@@ -2,10 +2,38 @@ import { useState } from "react";
 import HistorySidebar from "./components/HistorySidebar.jsx";
 import ChatStream from "./components/ChatStream.jsx";
 import EnvSwitcher from "./components/EnvSwitcher.jsx";
+import { getSession } from "./lib/api.js";
 
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeSession, setActiveSession] = useState(null);
+  // Bumped after each completed turn so the sidebar refetches the session list.
+  const [sessionVersion, setSessionVersion] = useState(0);
+  // Bumped on every "+ New investigation" click. Used in the ChatStream key so
+  // a fresh mount happens even if activeSession was already null (i.e. user
+  // clicks "new" right after finishing a chat — without this, the key
+  // wouldn't change and the old conversation would remain on screen).
+  const [newChatNonce, setNewChatNonce] = useState(0);
+  // Active deployment env (ppe / stage / future prod). EnvSwitcher initializes
+  // this from localStorage / backend default; ChatStream sends it on every
+  // request so the right kubeconfig + db creds are used.
+  const [activeEnv, setActiveEnv] = useState("");
+
+  async function handleSelect(stub) {
+    try {
+      const full = await getSession(stub.id);
+      setActiveSession(full);
+    } catch {
+      setActiveSession(stub);
+    }
+    setDrawerOpen(false);
+  }
+
+  function handleNew() {
+    setActiveSession(null);
+    setNewChatNonce((n) => n + 1);
+    setDrawerOpen(false);
+  }
 
   return (
     <div className="h-screen w-screen flex flex-col">
@@ -22,7 +50,9 @@ export default function App() {
         </button>
         <h1 className="text-[18px] font-semibold tracking-tight">Sherlock</h1>
         <span className="hidden sm:inline label-caps ml-2">RCA + API DISCOVERY</span>
-        <div className="ml-auto"><EnvSwitcher /></div>
+        <div className="ml-auto">
+          <EnvSwitcher value={activeEnv} onChange={setActiveEnv} />
+        </div>
       </header>
 
       {/* Body */}
@@ -37,8 +67,9 @@ export default function App() {
         >
           <HistorySidebar
             activeSession={activeSession}
-            onSelect={(s) => { setActiveSession(s); setDrawerOpen(false); }}
-            onNew={() => { setActiveSession(null); setDrawerOpen(false); }}
+            onSelect={handleSelect}
+            onNew={handleNew}
+            refreshKey={sessionVersion}
           />
         </aside>
 
@@ -51,7 +82,12 @@ export default function App() {
         )}
 
         <main className="flex-1 overflow-hidden">
-          <ChatStream key={activeSession?.id ?? "new"} session={activeSession} />
+          <ChatStream
+            key={activeSession?.id ?? `new-${newChatNonce}`}
+            session={activeSession}
+            env={activeEnv}
+            onTurnComplete={() => setSessionVersion((v) => v + 1)}
+          />
         </main>
       </div>
     </div>

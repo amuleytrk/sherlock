@@ -5,9 +5,11 @@ any meaningful API credit. Each check is bounded:
 
 - OpenAI: 1 tiny embedding call (~ $0.0001)
 - Anthropic: 1 tiny Haiku call (~ $0.0005)
-- MSSQL / Cosmos / Redis: a single read; no writes ever
-- kubectl: list ppe namespace pods (read-only)
+- Per-env (MSSQL / Cosmos / Redis / kubectl): a single read; no writes ever
 - Datadog: skipped if keys absent (this is OK — Sherlock works without it)
+
+Multi-env: per-env tool checks run once for each env in `SHERLOCK_ENVS`. So if
+`SHERLOCK_ENVS=stage,ppe` you'll see two MSSQL checks, two kubectl checks, etc.
 
 Usage:
     uv run python -m scripts.preflight
@@ -20,6 +22,8 @@ import time
 import traceback
 from typing import Callable
 
+from apps.api.env_context import EnvCreds
+
 
 # ANSI color helpers (stdout only)
 def _green(s: str) -> str: return f"\033[32m{s}\033[0m"
@@ -28,7 +32,7 @@ def _yellow(s: str) -> str: return f"\033[33m{s}\033[0m"
 def _gray(s: str) -> str:  return f"\033[90m{s}\033[0m"
 
 
-def _check(name: str, cost_hint: str, fn: Callable[[], str]) -> tuple[str, str | None, float]:
+def _check(fn: Callable[[], str]) -> tuple[str, str | None, float]:
     """Run a check; return (status, detail, duration_ms)."""
     t0 = time.monotonic()
     try:
@@ -44,7 +48,7 @@ class _Skip(Exception):
     pass
 
 
-# ---- individual checks ----
+# ---- env-agnostic checks ----
 
 
 def check_pgvector() -> str:
@@ -91,66 +95,11 @@ def check_anthropic_haiku() -> str:
     return f"haiku-4-5 OK · response={text!r} · in={r.usage.input_tokens} out={r.usage.output_tokens}"
 
 
-def check_mssql() -> str:
-    from mcp_servers.trk_mssql.server import _connect
-    from apps.api.settings import get_settings
-    s = get_settings()
-    if not (s.mssql_ppe_user and s.mssql_ppe_password):
-        raise _Skip("MSSQL credentials not set")
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT TOP 1 1 AS ok FROM trk.tapecfg_db")
-            row = cur.fetchone()
-    return f"connected to {s.mssql_ppe_database} · trk.tapecfg_db readable" if row else "connected but no rows"
-
-
-def check_cosmos() -> str:
-    from mcp_servers.trk_cosmos.server import _client
-    from apps.api.settings import get_settings
-    s = get_settings()
-    if not (s.cosmos_ppe_endpoint and s.cosmos_ppe_key and s.cosmos_ppe_database):
-        raise _Skip("Cosmos credentials not set")
-    db = _client().get_database_client(s.cosmos_ppe_database)
-    container = db.get_container_client("consumables")
-    items = list(container.query_items(
-        query="SELECT TOP 1 c.id FROM c",
-        enable_cross_partition_query=True,
-        max_item_count=1,
-    ))
-    return f"connected to {s.cosmos_ppe_database} · consumables container readable · sample id={items[0]['id'] if items else '(empty)'}"
-
-
-def check_redis() -> str:
-    from mcp_servers.trk_redis.server import _client
-    from apps.api.settings import get_settings
-    s = get_settings()
-    if not ((s.redis_ppe_host and s.redis_ppe_key) or s.redis_ppe_url):
-        raise _Skip("Redis credentials not set")
-    client = _client()
-    pong = client.ping()
-    return f"connected ({s.redis_ppe_host or 'via URL'}) · ping={pong}"
-
-
-def check_kubectl() -> str:
-    from mcp_servers.trk_kubectl.server import _run_kubectl
-    from apps.api.settings import get_settings
-    s = get_settings()
-    if not s.kubeconfig and not os.environ.get("KUBECONFIG"):
-        raise _Skip("KUBECONFIG not set; default ~/.kube/config will be used by Sherlock")
-    rc, out, err = _run_kubectl(["get", "namespaces", "-o", "name"], timeout=15)
-    if rc != 0:
-        raise RuntimeError(f"kubectl failed: {err.strip()}")
-    namespaces = [n.split("/", 1)[-1] for n in out.splitlines()]
-    has_ppe = "ppe" in namespaces
-    return f"kubectl OK · {len(namespaces)} namespaces visible · ppe namespace {'present ✓' if has_ppe else 'NOT FOUND ✗'}"
-
-
 def check_datadog() -> str:
     from apps.api.settings import get_settings
     s = get_settings()
     if not (s.datadog_api_key and s.datadog_app_key):
         raise _Skip("Datadog keys not set (Sherlock works fine without it — kubectl is the primary log source)")
-    # Don't burn a real query — just verify the SDK can be configured.
     from datadog_api_client import Configuration
     cfg = Configuration()
     cfg.api_key["apiKeyAuth"] = s.datadog_api_key
@@ -158,47 +107,127 @@ def check_datadog() -> str:
     return f"keys present · site={s.datadog_site}"
 
 
+# ---- per-env checks (closure over the active env's EnvCreds) ----
+
+
+def _mk_mssql(cfg: EnvCreds):
+    def fn() -> str:
+        if not (cfg.mssql_user and cfg.mssql_password):
+            raise _Skip(f"MSSQL_{cfg.env.upper()}_* not set")
+        import pymssql
+        with pymssql.connect(
+            server=cfg.mssql_server, user=cfg.mssql_user, password=cfg.mssql_password,
+            database=cfg.mssql_database, login_timeout=10, timeout=20, as_dict=True,
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT TOP 1 1 AS ok FROM trk.tapecfg_db")
+                row = cur.fetchone()
+        return f"connected to {cfg.mssql_database} · trk.tapecfg_db readable" if row else "connected but no rows"
+    return fn
+
+
+def _mk_cosmos(cfg: EnvCreds):
+    def fn() -> str:
+        if not (cfg.cosmos_endpoint and cfg.cosmos_key and cfg.cosmos_database):
+            raise _Skip(f"COSMOS_{cfg.env.upper()}_* not set")
+        from azure.cosmos import CosmosClient
+        db = CosmosClient(cfg.cosmos_endpoint, credential=cfg.cosmos_key).get_database_client(cfg.cosmos_database)
+        container = db.get_container_client("consumables")
+        items = list(container.query_items(
+            query="SELECT TOP 1 c.id FROM c",
+            enable_cross_partition_query=True, max_item_count=1,
+        ))
+        return f"connected to {cfg.cosmos_database} · consumables container readable · sample id={items[0]['id'] if items else '(empty)'}"
+    return fn
+
+
+def _mk_redis(cfg: EnvCreds):
+    def fn() -> str:
+        if not ((cfg.redis_host and cfg.redis_key) or cfg.redis_url):
+            raise _Skip(f"REDIS_{cfg.env.upper()}_* not set")
+        from mcp_servers.trk_redis.server import _client
+        pong = _client(cfg).ping()
+        return f"connected ({cfg.redis_host or 'via URL'}) · ping={pong}"
+    return fn
+
+
+def _mk_kubectl(cfg: EnvCreds):
+    def fn() -> str:
+        if not cfg.kubeconfig:
+            raise _Skip(f"KUBECONFIG_{cfg.env.upper()} not set")
+        if not os.path.isfile(cfg.kubeconfig):
+            raise RuntimeError(f"kubeconfig file missing: {cfg.kubeconfig}")
+        # Inject env so subprocess sees it; we can't use _run_kubectl from the
+        # server because that reads active_env which isn't set here.
+        import subprocess
+        env = dict(os.environ)
+        env["KUBECONFIG"] = cfg.kubeconfig
+        res = subprocess.run(
+            ["kubectl", "get", "namespaces", "-o", "name"],
+            capture_output=True, text=True, timeout=15, env=env, check=False,
+        )
+        if res.returncode != 0:
+            raise RuntimeError(f"kubectl failed: {res.stderr.strip()}")
+        namespaces = [n.split("/", 1)[-1] for n in res.stdout.splitlines()]
+        ns_present = cfg.k8s_namespace in namespaces
+        marker = "present ✓" if ns_present else "NOT FOUND ✗"
+        return f"kubectl OK · {len(namespaces)} namespaces visible · {cfg.k8s_namespace} namespace {marker}"
+    return fn
+
+
 # ---- runner ----
 
 
-CHECKS: list[tuple[str, str, Callable[[], str]]] = [
-    ("Postgres + pgvector",        "$0",       check_pgvector),
-    ("OpenAI embeddings",          "~$0.0001", check_openai),
-    ("Anthropic Haiku 4.5",        "~$0.0005", check_anthropic_haiku),
-    ("MSSQL PPE (dbtrkmtppe2)",    "$0",       check_mssql),
-    ("Cosmos PPE",                 "$0",       check_cosmos),
-    ("Redis PPE",                  "$0",       check_redis),
-    ("kubectl PPE cluster",        "$0",       check_kubectl),
-    ("Datadog (optional)",         "$0",       check_datadog),
-]
-
-
 def main():
+    from apps.api.settings import get_settings
+    s = get_settings()
+
     print(_gray("Sherlock preflight — validates every external dependency."))
+    print(_gray(f"Configured envs: {', '.join(s.configured_envs())}"))
     print(_gray("Total estimated API spend for this run: < $0.001"))
     print()
 
-    results = []
-    for name, cost_hint, fn in CHECKS:
+    results: list[tuple[str, str]] = []
+
+    # Env-agnostic checks
+    for name, cost_hint, fn in [
+        ("Postgres + pgvector",  "$0",       check_pgvector),
+        ("OpenAI embeddings",    "~$0.0001", check_openai),
+        ("Anthropic Haiku 4.5",  "~$0.0005", check_anthropic_haiku),
+        ("Datadog (optional)",   "$0",       check_datadog),
+    ]:
         print(f"  {name:<32} ", end="", flush=True)
-        status, detail, duration = _check(name, cost_hint, fn)
-        if status == "ok":
-            badge = _green("OK  ")
-        elif status == "skip":
-            badge = _yellow("SKIP")
-        else:
-            badge = _red("FAIL")
+        status, detail, duration = _check(fn)
+        badge = _green("OK  ") if status == "ok" else (_yellow("SKIP") if status == "skip" else _red("FAIL"))
         print(f"{badge} {duration:>6.0f}ms  {_gray(cost_hint):<10}  {detail}")
         results.append((name, status))
 
+    # Per-env checks
+    for env in s.configured_envs():
+        cfg = s.env_config(env)
+        print()
+        print(_gray(f"--- env: {env} ---"))
+        for name, fn in [
+            (f"MSSQL ({cfg.mssql_database or '?'})", _mk_mssql(cfg)),
+            (f"Cosmos ({cfg.cosmos_database or '?'})", _mk_cosmos(cfg)),
+            (f"Redis", _mk_redis(cfg)),
+            (f"kubectl ({cfg.k8s_namespace or '?'} ns)", _mk_kubectl(cfg)),
+        ]:
+            label = f"  {env}/{name}"
+            print(f"  {label:<32} ", end="", flush=True)
+            status, detail, duration = _check(fn)
+            badge = _green("OK  ") if status == "ok" else (_yellow("SKIP") if status == "skip" else _red("FAIL"))
+            print(f"{badge} {duration:>6.0f}ms  {_gray('$0'):<10}  {detail}")
+            results.append((label.strip(), status))
+
     print()
-    failures = [n for n, s in results if s == "fail"]
+    failures = [n for n, st in results if st == "fail"]
     if failures:
         print(_red(f"✗ {len(failures)} failure(s): {', '.join(failures)}"))
-        print(_red("Fix these before running the indexer."))
+        print(_red("Fix these before running the indexer (or before relying on the failing env)."))
         sys.exit(1)
 
-    skips = [n for n, s in results if s == "skip"]
+    skips = [n for n, st in results if st == "skip"]
     if skips:
         print(_yellow(f"⚠ {len(skips)} skipped (likely missing creds): {', '.join(skips)}"))
         print(_yellow("These will gracefully degrade in Sherlock — the agent just won't use them."))

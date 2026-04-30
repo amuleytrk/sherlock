@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listSessions } from "../lib/api.js";
 
-export default function HistorySidebar({ activeSession, onSelect, onNew }) {
+export default function HistorySidebar({ activeSession, onSelect, onNew, refreshKey = 0 }) {
   const [history, setHistory] = useState([]);
 
   useEffect(() => {
@@ -10,7 +10,7 @@ export default function HistorySidebar({ activeSession, onSelect, onNew }) {
       .then((d) => { if (alive) setHistory(d.sessions || []); })
       .catch(() => { if (alive) setHistory([]); });
     return () => { alive = false; };
-  }, []);
+  }, [refreshKey]);
 
   return (
     <div className="h-full flex flex-col p-4">

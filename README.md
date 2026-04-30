@@ -107,9 +107,13 @@ sherlock/
 - Python 3.12+ (3.13 verified) and `uv`
 - Node 20+ (22 verified)
 - Docker Desktop (for local Postgres + pgvector)
-- `kubectl` configured against the Trackonomy PPE AKS cluster
-- Read access to PPE: MSSQL (`dbtrkmtppe2`), Cosmos, Redis, Datadog
+- `kubectl` on PATH
 - API keys: Anthropic, OpenAI
+- Per-env: read access to MSSQL / Cosmos / Redis + a self-contained kubeconfig
+  (admin or SP-backed) per env you want to investigate. Sherlock currently
+  ships pre-wired for **PPE** and **Stage**; flip via the dropdown in the
+  top-right of the UI. Adding more envs is just `.env` work — see
+  [Multi-env setup](#multi-env-setup).
 
 ### One-time setup
 
@@ -175,6 +179,62 @@ uv run python -m indexer.run             # re-index (idempotent)
 The indexer hard-fails if any repo on disk is on a different branch than
 the one declared in `repos.yml` — preventing silent indexing of the wrong
 code.
+
+### Multi-env setup
+
+Sherlock can target multiple deployment environments. Switch via the
+dropdown in the top-right of the UI; each chat request carries the active
+env, and every backend tool (MSSQL, Cosmos, Redis, kubectl) reads
+env-specific credentials.
+
+**The kubectl gotcha.** Stage and PPE live on different Azure
+subscriptions. To avoid mutating your local `az login` context per request,
+each env uses a **self-contained kubeconfig** (admin cert or service
+principal) — generate once, point `KUBECONFIG_<ENV>` at it, done.
+
+```bash
+# PPE (already wired if you came from the v1 docs)
+az aks get-credentials --admin \
+  --subscription trk-mt-prod-sub \
+  --resource-group <ppe-rg> --name <ppe-aks> \
+  -f ~/.kube/sherlock-ppe.config
+
+# Stage (subscription differs from PPE)
+az aks get-credentials --admin \
+  --subscription trk-mt-dev-sub \
+  --resource-group rg-mt-global-v2-eastus2 \
+  --name aks-trk-mt-v2-shared-eastus2 \
+  -f ~/.kube/sherlock-stage.config
+```
+
+Then in `.env`:
+
+```bash
+SHERLOCK_ENVS=stage,ppe
+SHERLOCK_DEFAULT_ENV=ppe
+
+KUBECONFIG_PPE=~/.kube/sherlock-ppe.config
+KUBECONFIG_STAGE=~/.kube/sherlock-stage.config
+
+# Per-env DB/cache creds — see .env.example for the full list:
+MSSQL_PPE_*    / MSSQL_STAGE_*
+COSMOS_PPE_*   / COSMOS_STAGE_*
+REDIS_PPE_*    / REDIS_STAGE_*
+
+# Trackonomy convention: PPE pods are labeled `app=<svc>-ppe` in namespace
+# `ppe`; stage pods are `-dev` in namespace `dev`. Defaults match these;
+# override with K8S_<ENV>_NAMESPACE / K8S_<ENV>_POD_SUFFIX if needed.
+```
+
+Adding a new env (e.g. **prod**) requires zero code changes:
+1. Generate a self-contained kubeconfig (admin or SP).
+2. Add `MSSQL_PROD_*`, `COSMOS_PROD_*`, `REDIS_PROD_*`, `KUBECONFIG_PROD`.
+3. Append `prod` to `SHERLOCK_ENVS`.
+4. Restart. Dropdown picks it up.
+
+`uv run python -m scripts.preflight` runs per-env tool checks for every
+configured env — use it to verify Stage credentials end-to-end before
+relying on them.
 
 ### Demo mode (no creds required)
 

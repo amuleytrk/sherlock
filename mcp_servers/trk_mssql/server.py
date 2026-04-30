@@ -1,9 +1,7 @@
 """trk-mssql MCP server.
 
-Read-only parameterized SELECT queries against the trk schema (PPE MSSQL).
-The catalog of allowed queries lives in `templates.py`. The agent picks a
-query_type and supplies named params; the server constructs the query from
-trusted templates.
+Read-only parameterized SELECT queries against the trk schema. Reads creds
+from the active env's config (PPE / Stage / future envs) — see env_context.py.
 
 Read-only is enforced at three layers:
 1. SQL user permission (must be SELECT-only on schema::trk)
@@ -18,6 +16,7 @@ from typing import Any
 
 import pymssql
 
+from apps.api.env_context import active_env
 from apps.api.settings import get_settings
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -31,11 +30,17 @@ server = Server("trk-mssql")
 
 def _connect():
     s = get_settings()
+    cfg = s.env_config(active_env.get() or s.sherlock_default_env)
+    if not (cfg.mssql_server and cfg.mssql_user and cfg.mssql_password):
+        raise RuntimeError(
+            f"MSSQL not configured for env={cfg.env!r} — set "
+            f"MSSQL_{cfg.env.upper()}_SERVER / _USER / _PASSWORD / _DATABASE in .env"
+        )
     return pymssql.connect(
-        server=s.mssql_ppe_server,
-        user=s.mssql_ppe_user,
-        password=s.mssql_ppe_password,
-        database=s.mssql_ppe_database,
+        server=cfg.mssql_server,
+        user=cfg.mssql_user,
+        password=cfg.mssql_password,
+        database=cfg.mssql_database,
         login_timeout=10,
         timeout=20,
         as_dict=True,
@@ -52,7 +57,8 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="query_template",
             description=(
-                "Run a vetted, read-only parameterized SELECT against the trk schema in PPE.\n"
+                "Run a vetted, read-only parameterized SELECT against the trk schema "
+                "in the currently active env (PPE/Stage/etc).\n"
                 "Available query_types:\n"
                 f"{catalog_doc}"
             ),

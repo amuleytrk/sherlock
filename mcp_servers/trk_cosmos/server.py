@@ -16,6 +16,7 @@ from typing import Any
 
 from azure.cosmos import CosmosClient
 
+from apps.api.env_context import EnvCreds, active_env
 from apps.api.settings import get_settings
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -30,9 +31,13 @@ _CONTAINERS = ["consumables", "infrastructure", "booking", "health", "inventory"
 _FORBIDDEN_KEYWORDS = ("INSERT", "REPLACE", "UPSERT", "DELETE", "MERGE", "EXEC", "EXECUTE")
 
 
-def _client() -> CosmosClient:
+def _current_cfg() -> EnvCreds:
     s = get_settings()
-    return CosmosClient(s.cosmos_ppe_endpoint, credential=s.cosmos_ppe_key)
+    return s.env_config(active_env.get() or s.sherlock_default_env)
+
+
+def _client(cfg: EnvCreds) -> CosmosClient:
+    return CosmosClient(cfg.cosmos_endpoint, credential=cfg.cosmos_key)
 
 
 @server.list_tools()
@@ -80,15 +85,21 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    s = get_settings()
-    if not s.cosmos_ppe_endpoint or not s.cosmos_ppe_key:
-        return [TextContent(type="text", text="cosmos not configured (missing endpoint/key in env)")]
+    cfg = _current_cfg()
+    if not cfg.cosmos_endpoint or not cfg.cosmos_key:
+        return [TextContent(
+            type="text",
+            text=(
+                f"cosmos not configured for env={cfg.env!r} — set "
+                f"COSMOS_{cfg.env.upper()}_ENDPOINT / _KEY / _DATABASE in .env"
+            ),
+        )]
 
     container_name = arguments.get("container")
     if container_name not in _CONTAINERS:
         return [TextContent(type="text", text=f"unknown container: {container_name}")]
 
-    db = _client().get_database_client(s.cosmos_ppe_database)
+    db = _client(cfg).get_database_client(cfg.cosmos_database)
     container = db.get_container_client(container_name)
 
     if name == "read_document":

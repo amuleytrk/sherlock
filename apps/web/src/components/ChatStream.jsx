@@ -7,17 +7,29 @@ import RcaReport from "./RcaReport.jsx";
 import ThinkingIndicator from "./ThinkingIndicator.jsx";
 import ToolCallStatus from "./ToolCallStatus.jsx";
 
-export default function ChatStream({ session }) {
+export default function ChatStream({ session, env, onTurnComplete }) {
   const [messages, setMessages] = useState(session?.messages ?? []);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [trace, setTrace] = useState([]);
   const abortRef = useRef(null);
   const scrollRef = useRef(null);
+  // Live session ID — initialized from a loaded session, then updated by the
+  // backend's `session` SSE event on the first send of a brand-new chat. Held
+  // in a ref so subsequent sends within the same React mount reuse the ID
+  // without triggering re-renders.
+  const sessionIdRef = useRef(session?.id ?? null);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, trace]);
+
+  // Abort any in-flight stream when this component unmounts (e.g. user clicks
+  // "+ New investigation" mid-response). The backend's _record_session has a
+  // finally{} block that persists whatever was streamed before disconnect.
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   async function send() {
     const text = input.trim();
@@ -32,9 +44,13 @@ export default function ChatStream({ session }) {
     try {
       await streamChat({
         message: text,
-        sessionId: session?.id ?? null,
+        sessionId: sessionIdRef.current,
+        env: env || null,
         signal: abortRef.current.signal,
         onEvent(name, data) {
+          if (name === "session" && data?.id) {
+            sessionIdRef.current = data.id;
+          }
           collected.push({ name, data });
           setTrace([...collected]);
         },
@@ -45,6 +61,7 @@ export default function ChatStream({ session }) {
       setMessages((ms) => [...ms, { role: "agent", trace: collected }]);
       setTrace([]);
       setBusy(false);
+      onTurnComplete?.();
     }
   }
 
@@ -129,6 +146,21 @@ function MessageBubble({ m, live = false }) {
         <div className="max-w-[80%] px-4 py-2 rounded-lg bg-surface-3 text-ink whitespace-pre-wrap">
           {m.content}
         </div>
+      </div>
+    );
+  }
+  // Persisted agent turn loaded from history — no SSE trace, just final
+  // content + optional rca_id pointer. The full RCA report is fetched fresh
+  // from /api/rca/{rca_id} so reloads always show current artifact state.
+  if (!m.trace) {
+    return (
+      <div className="space-y-3">
+        {m.rca_id && <RcaReport rcaId={m.rca_id} />}
+        {m.content && !m.rca_id && (
+          <div className="prose-invert">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+          </div>
+        )}
       </div>
     );
   }

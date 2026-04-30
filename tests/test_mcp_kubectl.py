@@ -9,6 +9,18 @@ from unittest.mock import patch
 import pytest
 
 
+def _stub_cfg():
+    """An EnvCreds with a valid-looking kubeconfig path so `_run_kubectl`
+    progresses past the configuration check and into the (mocked) subprocess."""
+    from apps.api.env_context import EnvCreds
+    return EnvCreds(
+        env="ppe",
+        kubeconfig="/tmp/sherlock-test-kubeconfig",
+        k8s_namespace="ppe",
+        k8s_pod_suffix="-ppe",
+    )
+
+
 def test_module_imports():
     importlib.import_module("mcp_servers.trk_kubectl.server")
 
@@ -39,6 +51,7 @@ async def test_tail_pod_logs_no_pods_match(monkeypatch):
         return R()
 
     monkeypatch.setattr(srv.subprocess, "run", fake_run)
+    monkeypatch.setattr(srv, "_current_cfg", _stub_cfg)
     out = await srv.call_tool(
         "tail_pod_logs",
         {"namespace": "trk", "label_selector": "app=missing"},
@@ -66,6 +79,7 @@ async def test_tail_pod_logs_fans_out_across_pods(monkeypatch):
         return R()
 
     monkeypatch.setattr(srv.subprocess, "run", fake_run)
+    monkeypatch.setattr(srv, "_current_cfg", _stub_cfg)
     out = await srv.call_tool(
         "tail_pod_logs",
         {"namespace": "trk", "label_selector": "app=ingress-service"},

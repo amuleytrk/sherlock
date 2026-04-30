@@ -102,3 +102,23 @@ def append_message(
             "VALUES (?, ?, ?, ?, ?)",
             (session_id, role, content, rca_id, now()),
         )
+
+
+def get_session(session_id: str) -> dict | None:
+    with conn() as c:
+        row = c.execute(
+            "SELECT id, title, created_at, updated_at FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_session_messages(session_id: str) -> list[dict]:
+    """Messages for a session, oldest first."""
+    with conn() as c:
+        rows = c.execute(
+            "SELECT role, content, rca_id, created_at FROM messages "
+            "WHERE session_id = ? ORDER BY id ASC",
+            (session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]

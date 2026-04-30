@@ -1,9 +1,11 @@
 """Sherlock FastAPI app — entry point for the web UI.
 
 Routes:
-    GET  /health                  — liveness probe
+    GET  /health                  — liveness probe + active env list
+    GET  /envs                    — configured envs + per-tool availability
     POST /chat                    — SSE-streamed agent trace for a user message
     GET  /sessions                — list past sessions (newest first, max 50)
+    GET  /sessions/{id}           — fetch a single session + its messages
     GET  /rca/{rca_id}            — fetch a synthesized RCA artifact + analysis files
     GET  /rca/{rca_id}/audit      — fetch tool-call audit log for an RCA
     GET  /artifacts?path=...      — serve a file from the investigations dir (path-confined)
@@ -11,6 +13,7 @@ Routes:
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -20,6 +23,7 @@ from pydantic import BaseModel
 from apps.api import audit, demo, store
 from apps.api.agents.discovery import run_discovery
 from apps.api.agents.rca import run_rca
+from apps.api.env_context import active_env
 from apps.api.router import classify
 from apps.api.settings import get_settings
 from apps.api.sse import sse
@@ -30,12 +34,36 @@ app = FastAPI(title="Sherlock", version="0.1.0")
 @app.get("/health")
 def health() -> dict:
     s = get_settings()
-    return {"status": "ok", "release": s.sherlock_release, "demo_mode": s.sherlock_demo_mode}
+    return {
+        "status": "ok",
+        "release": s.sherlock_release,
+        "demo_mode": s.sherlock_demo_mode,
+        "envs": s.configured_envs(),
+        "default_env": s.sherlock_default_env,
+    }
+
+
+@app.get("/envs")
+def list_envs() -> dict:
+    """Configured envs with per-tool availability flags.
+
+    The frontend dropdown uses this to render the env list and grey out
+    tools that aren't configured for a given env (so the user knows
+    that e.g. switching to Stage means kubectl works but MSSQL doesn't yet)."""
+    s = get_settings()
+    return {
+        "default": s.sherlock_default_env,
+        "envs": [
+            {"name": e, "availability": s.env_availability(e)}
+            for e in s.configured_envs()
+        ],
+    }
 
 
 class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
+    env: str | None = None
 
 
 async def _dispatch(req: ChatRequest):
@@ -72,15 +100,102 @@ async def _dispatch(req: ChatRequest):
     yield sse("done", {})
 
 
+def _parse_sse_chunk(chunk: str) -> tuple[str, dict]:
+    """Best-effort parse of an SSE chunk we just emitted, so the wrapper can
+    sniff event names without changing the inner agents' yield contract."""
+    parts = chunk.split("\n", 2)
+    if (
+        len(parts) < 2
+        or not parts[0].startswith("event: ")
+        or not parts[1].startswith("data: ")
+    ):
+        return "", {}
+    try:
+        return parts[0][len("event: "):], json.loads(parts[1][len("data: "):])
+    except json.JSONDecodeError:
+        return "", {}
+
+
+async def _record_session(req: ChatRequest):
+    """Persist user/agent turns and stamp the SSE stream with a `session` event.
+
+    For new chats, mints a UUID and derives a title from the user's first message.
+    For existing sessions, bumps `updated_at`. The agent's persisted reply is
+    either the accumulated Discovery answer text, the Conversational answer, or
+    a stub linked to an RCA's `rca_id` (the full RCA report is recoverable from
+    /rca/{rca_id})."""
+    s = get_settings()
+    # Resolve and set active env BEFORE anything else — every MCP server reads
+    # active_env.get() to pick the right kubeconfig, MSSQL creds, etc.
+    requested_env = (req.env or s.sherlock_default_env).lower()
+    if requested_env not in s.configured_envs():
+        requested_env = s.sherlock_default_env.lower()
+    active_env.set(requested_env)
+
+    session_id = req.session_id
+    is_new = not session_id
+    if is_new:
+        session_id = str(uuid.uuid4())
+        title = req.message.strip()[:60]
+        if len(req.message.strip()) > 60:
+            title += "..."
+        store.upsert_session(session_id, title=title or "Untitled")
+    else:
+        store.upsert_session(session_id)
+    store.append_message(session_id, role="user", content=req.message)
+
+    yield sse("session", {"id": session_id, "is_new": is_new, "env": requested_env})
+
+    answer_chunks: list[str] = []
+    final_answer: str | None = None
+    rca_id: str | None = None
+
+    try:
+        async for chunk in _dispatch(req):
+            name, data = _parse_sse_chunk(chunk)
+            if name == "answer_delta":
+                t = data.get("text")
+                if isinstance(t, str):
+                    answer_chunks.append(t)
+            elif name == "answer":
+                t = data.get("text")
+                if isinstance(t, str):
+                    final_answer = t
+            elif name == "rca_done":
+                r = data.get("rca_id")
+                if isinstance(r, str):
+                    rca_id = r
+            yield chunk
+    finally:
+        # finally{} runs even if the client disconnects mid-stream, so
+        # whatever the agent has produced so far still gets persisted.
+        if rca_id:
+            # The full RCA report is recoverable via /rca/{rca_id}; no body needed.
+            store.append_message(session_id, role="agent", content="", rca_id=rca_id)
+        elif answer_chunks:
+            store.append_message(session_id, role="agent", content="".join(answer_chunks))
+        elif final_answer:
+            store.append_message(session_id, role="agent", content=final_answer)
+
+
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    return StreamingResponse(_dispatch(req), media_type="text/event-stream")
+    return StreamingResponse(_record_session(req), media_type="text/event-stream")
 
 
 @app.get("/sessions")
 def list_sessions_endpoint():
     """Return the last 50 sessions, newest first."""
     return {"sessions": store.list_sessions(limit=50)}
+
+
+@app.get("/sessions/{session_id}")
+def get_session_endpoint(session_id: str):
+    """Return a session's metadata + ordered messages (oldest first)."""
+    sess = store.get_session(session_id)
+    if not sess:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {**sess, "messages": store.get_session_messages(session_id)}
 
 
 def _resolve_artifact_path(path: str) -> Path:

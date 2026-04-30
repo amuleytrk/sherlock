@@ -1,4 +1,4 @@
-"""trk-kubectl MCP server. Read-only kubectl wrapper for AKS PPE.
+"""trk-kubectl MCP server. Read-only kubectl wrapper, env-aware.
 
 Tools:
 - `tail_pod_logs(namespace, label_selector, since_seconds, max_lines_per_pod)`
@@ -7,11 +7,12 @@ Tools:
 - `describe_pod(namespace, pod_name)`
 - `previous_logs(namespace, pod_name, max_lines)` — fetch the previous (crashed) container's stdout
 
-All tools shell out to `kubectl` with read verbs only. The kubeconfig path is
-read from the `kubeconfig` setting (which mirrors the standard KUBECONFIG env
-var if set). Verbs are whitelisted; non-read verbs raise immediately.
+The active env's KUBECONFIG is set per-subprocess via env injection — never
+mutates the user's day-to-day kubectl context. Each env has its own
+self-contained kubeconfig file (admin or SP-backed) so flipping envs in the UI
+never depends on `az account set` or anything global.
 
-In-process call entry: `await call_tool(name, arguments) -> list[TextContent]`.
+Verbs are whitelisted; non-read verbs raise immediately.
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from apps.api.env_context import EnvCreds, active_env
 from apps.api.settings import get_settings
 
 
@@ -33,14 +35,27 @@ server = Server("trk-kubectl")
 READ_VERBS = {"get", "describe", "logs", "top", "explain", "version"}
 
 
+def _current_cfg() -> EnvCreds:
+    s = get_settings()
+    return s.env_config(active_env.get() or s.sherlock_default_env)
+
+
 def _run_kubectl(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
-    """Run `kubectl` with the given args. Verb (args[0]) must be in READ_VERBS."""
+    """Run `kubectl` with the given args. Verb (args[0]) must be in READ_VERBS.
+    Injects the active env's KUBECONFIG into the subprocess, so concurrent
+    requests on different envs don't collide."""
     if not args or args[0] not in READ_VERBS:
         raise ValueError(f"verb '{args[0] if args else ''}' is not in the read whitelist")
-    s = get_settings()
+    cfg = _current_cfg()
+    if not cfg.kubeconfig:
+        return (
+            2,
+            "",
+            f"kubectl not configured for env={cfg.env!r} — set "
+            f"KUBECONFIG_{cfg.env.upper()} in .env to a self-contained kubeconfig path",
+        )
     env = dict(os.environ)
-    if s.kubeconfig:
-        env["KUBECONFIG"] = s.kubeconfig
+    env["KUBECONFIG"] = cfg.kubeconfig
     try:
         res = subprocess.run(
             ["kubectl", *args],

@@ -135,8 +135,11 @@ def classify(message: str) -> RouterResult:
     intent = data.get("intent", "CONVERSATIONAL")
     if intent not in _VALID_INTENTS:
         intent = "CONVERSATIONAL"
-    return RouterResult(
-        intent=intent,
-        entities=data.get("entities") or {},
-        raw=text,
-    )
+    entities = data.get("entities") or {}
+    # Normalize tape_id to uppercase — MSSQL `trk` schema and Cosmos
+    # partition keys are uppercase, so downstream tools can compare without
+    # case-folding.
+    tid = entities.get("tape_id")
+    if isinstance(tid, str):
+        entities["tape_id"] = tid.upper()
+    return RouterResult(intent=intent, entities=entities, raw=text)

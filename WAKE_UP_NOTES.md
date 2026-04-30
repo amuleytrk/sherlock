@@ -22,23 +22,35 @@ All five days of the implementation plan landed:
 
 ### 1. Fill in `.env`
 
+Sherlock supports multiple deployment envs (PPE, Stage, future Prod) — see
+the [Multi-env setup](./README.md#multi-env-setup) section in the README for
+the full pattern. At minimum:
+
 ```bash
 cp .env.example .env  # already done overnight
 # edit with real values:
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-proj-...
+
+SHERLOCK_ENVS=stage,ppe         # which envs the dropdown offers
+SHERLOCK_DEFAULT_ENV=ppe
+
+# Per-env: <TOOL>_<ENV>_<FIELD>. e.g.:
 MSSQL_PPE_USER=...
 MSSQL_PPE_PASSWORD=...
 COSMOS_PPE_ENDPOINT=https://....documents.azure.com:443/
 COSMOS_PPE_KEY=...
 COSMOS_PPE_DATABASE=...
-REDIS_PPE_URL=rediss://:...@...redis.cache.windows.net:6380
-DATADOG_API_KEY=...
-DATADOG_APP_KEY=...
-KUBECONFIG=/Users/aadityamuley/.kube/config
+REDIS_PPE_HOST=...
+REDIS_PPE_KEY=...
+KUBECONFIG_PPE=/Users/aadityamuley/.kube/sherlock-ppe.config
+
+# Stage: same shape, swap PPE → STAGE.
+# k8s convention defaults to <env-name> namespace + -<env-name> pod suffix;
+# override with K8S_<ENV>_NAMESPACE / _POD_SUFFIX if your cluster differs.
 ```
 
-The app **gracefully degrades** when keys are missing — Discovery returns a "key not set" status event instead of crashing, RCA agent yields a clear blocked message. So you can incrementally add keys and watch the modes light up.
+The app **gracefully degrades** when keys are missing — Discovery returns a "key not set" status event instead of crashing, RCA agent yields a clear blocked message. The env dropdown greys out per-tool dots when an env's creds are unset, so you can see at a glance what's wired.
 
 ### 2. Index the corpus
 

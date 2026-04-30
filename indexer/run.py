@@ -20,14 +20,33 @@ from indexer.parse import parse_markdown
 from indexer.secret_scan import contains_secret
 
 
+# Repos that hold many micro-services as subdirectories. For these, tag chunks
+# with the SECOND path component (the actual service / package), not the repo
+# name — so RCA agents can filter `sherlock_search(service="ingress-service")`
+# and actually get results. Files at the monorepo root keep the repo name.
+_MONOREPOS: set[str] = {"multi-tenant-core-services"}
+
+
 def _service_for(path: Path, repos_root: Path) -> str:
-    """The first path component under `repos/` is the service name. Files outside
-    `repos/` (e.g. ~/plans/work) get `service='platform'`."""
+    """Determine the service tag for a chunk based on its path.
+
+    - Files outside `repos/` (e.g. ~/plans/work) → `platform`.
+    - Files under `repos/<single-service-repo>/...` → repo name.
+    - Files under `repos/<monorepo>/<sub>/...` → sub-service name.
+    - Files at a monorepo root (README.md, package.json) → repo name.
+    """
     try:
         rel = path.resolve().relative_to(repos_root.resolve())
-        return rel.parts[0] if rel.parts else "platform"
     except ValueError:
         return "platform"
+    parts = rel.parts
+    if not parts:
+        return "platform"
+    repo = parts[0]
+    if repo in _MONOREPOS and len(parts) >= 3:
+        # parts[1] is the sub-service / package; parts[2..] is the file inside.
+        return parts[1]
+    return repo
 
 
 def _validate_repos_on_correct_branches(repos_root: Path) -> None:

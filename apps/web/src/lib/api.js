@@ -6,9 +6,21 @@ export async function getHealth() {
   return r.json();
 }
 
+export async function listEnvs() {
+  const r = await fetch("/api/envs");
+  if (!r.ok) return { default: "ppe", envs: [] };
+  return r.json();
+}
+
 export async function listSessions() {
   const r = await fetch("/api/sessions");
   if (!r.ok) return { sessions: [] };
+  return r.json();
+}
+
+export async function getSession(sessionId) {
+  const r = await fetch(`/api/sessions/${sessionId}`);
+  if (!r.ok) throw new Error(`/sessions/${sessionId} → ${r.status}`);
   return r.json();
 }
 
