@@ -51,11 +51,38 @@ def test_pg_templates_specify_required_params():
 
 def test_redis_key_patterns_complete():
     from mcp_servers.trk_redis.server import KEY_PATTERNS
-    required = {"idict", "pids_to_limes", "ble_config", "mesh_dedup", "dwell_timer"}
+    required = {"idict", "pids_to_limes", "ble_config", "mesh_dedup", "dwell_timer", "offline_heartbeat"}
     assert required.issubset(set(KEY_PATTERNS.keys()))
     # Every pattern uses a read-only op
     for kt, spec in KEY_PATTERNS.items():
         assert spec["op"] in {"GET", "HGETALL", "EXISTS", "ZSCORE"}
+
+
+def test_redis_key_pattern_correctness():
+    """Verify the live-verified key patterns are exact — bugs here cause silent miss on real keys."""
+    from mcp_servers.trk_redis.server import KEY_PATTERNS
+    # mesh_dedup must use the release_2.1 prefix (not the legacy 'meshDeduping')
+    assert KEY_PATTERNS["mesh_dedup"]["pattern"].startswith("mobileGatewayDeduping:")
+    # dwell_timer key must NOT embed zone_id — zone_id is the ZSCORE member argument
+    assert "zone_id" not in KEY_PATTERNS["dwell_timer"]["pattern"]
+    assert "zone_id" not in KEY_PATTERNS["dwell_timer"]["params"]
+    # idict uses device_id (not tape_id)
+    assert "device_id" in KEY_PATTERNS["idict"]["params"]
+    assert "tape_id" not in KEY_PATTERNS["idict"]["params"]
+    # offline_heartbeat confirmed live in PPE
+    assert KEY_PATTERNS["offline_heartbeat"]["pattern"] == "OFFLINEHEARTBEAT:{device_id}"
+
+
+def test_cosmos_containers_complete():
+    """Verify the RCA-relevant container set matches live ground truth."""
+    from mcp_servers.trk_cosmos.server import _CONTAINERS, _QUERY_ONLY_CONTAINERS
+    required = {"consumables", "infrastructure", "health-history", "deviations",
+                "devices", "booking", "organizations", "inventory"}
+    assert required == set(_CONTAINERS), f"container mismatch: {set(_CONTAINERS) ^ required}"
+    # 'health' 404s on live PPE — must not be present
+    assert "health" not in _CONTAINERS
+    # query-only containers must be in the allowed set
+    assert _QUERY_ONLY_CONTAINERS.issubset(set(_CONTAINERS))
 
 
 @pytest.mark.asyncio
@@ -104,7 +131,7 @@ async def test_redis_unknown_key_type_returns_error():
 
 @pytest.mark.asyncio
 async def test_redis_missing_param_for_pattern():
-    """idict requires tape_id; without it we get a missing-param error."""
+    """idict requires device_id; without it we get a missing-param error."""
     from mcp_servers.trk_redis.server import call_tool
     out = await call_tool("redis_get", {"key_type": "idict", "params": {}})
     txt = out[0].text

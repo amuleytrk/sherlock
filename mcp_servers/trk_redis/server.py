@@ -24,34 +24,59 @@ server = Server("trk-redis")
 
 KEY_PATTERNS: dict[str, dict] = {
     "idict": {
-        "pattern": "iDict:{tape_id}",
+        "pattern": "iDict:{device_id}",
         "op": "HGETALL",
-        "params": ["tape_id"],
-        "doc": "Per-device cached config: customer, authorized_groups, facility, displayname, personality.",
+        "params": ["device_id"],
+        "doc": (
+            "Per-device cached config (HASH): customer_id, authorized_group, facility_id, "
+            "displayname, personality, tape_type, application_id. "
+            "TTL = REDIS_TTL env (default 86400 s). Written by ingress-service on cache-miss from PG trk.device."
+        ),
     },
     "pids_to_limes": {
         "pattern": "pidsToLimeIds:{facility_id}",
         "op": "HGETALL",
         "params": ["facility_id"],
-        "doc": "PID-to-lime-id map for a facility — used by lime selection algorithm.",
+        "doc": "PID-to-lime-id map for a facility (HASH) — used by lime selection algorithm.",
     },
     "ble_config": {
         "pattern": "bleConfig:{gateway_mac_id}",
         "op": "GET",
         "params": ["gateway_mac_id"],
-        "doc": "BLE config JSON for a gateway.",
+        "doc": (
+            "BLE config JSON array for a gateway (STRING). "
+            "Written by event-preprocessor-service. TTL = BLE_CONFIG_REDIS_TTL (default 86400 s)."
+        ),
     },
     "mesh_dedup": {
-        "pattern": "meshDeduping:{device_id}:{g1}",
+        "pattern": "mobileGatewayDeduping:{device_id}:{g1}",
         "op": "EXISTS",
         "params": ["device_id", "g1"],
-        "doc": "Mesh dedup marker: true if this G1 packet was already processed in the last 5 min.",
+        "doc": (
+            "Mobile-gateway mesh dedup marker (HASH). "
+            "True if this G1 packet was already processed in the last 5 min (TTL = REDIS_MOBILE_GATEWAY_TTL, default 300 s). "
+            "Written by event-preprocessor-service release_2.1."
+        ),
     },
     "dwell_timer": {
-        "pattern": "ZONETIMER_{customer_id}:{authorized_group}:{tape_id}:{zone_id}",
+        "pattern": "ZONETIMER_{customer_id}:{authorized_group}:{tape_id}",
         "op": "ZSCORE",
-        "params": ["customer_id", "authorized_group", "tape_id", "zone_id"],
-        "doc": "Dwell timer entry's score. Requires `member` arg too (the score sub-key).",
+        "params": ["customer_id", "authorized_group", "tape_id"],
+        "doc": (
+            "Zone dwell timer (ZSET). Pass zone_id as `member` to get the dwell score for that zone. "
+            "zone_id is the ZSCORE member — it is NOT embedded in the key string. "
+            "Written by ingress-service rule-engine path."
+        ),
+    },
+    "offline_heartbeat": {
+        "pattern": "OFFLINEHEARTBEAT:{device_id}",
+        "op": "GET",
+        "params": ["device_id"],
+        "doc": (
+            "Offline heartbeat marker (STRING). "
+            "Confirmed live in PPE Redis (dbsize ~290k). "
+            "Used to detect devices not seen for an extended period."
+        ),
     },
 }
 

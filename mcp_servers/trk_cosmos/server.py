@@ -6,6 +6,16 @@ Read documents from Cosmos containers. Two operations:
 
 Read-only enforced at two layers: read-only access key, AND we explicitly
 reject any query that isn't a SELECT or contains DML keywords.
+
+Container partition key reference (live PPE — trk-mt-ppe-cosdb-eus, db dbmtppe):
+  consumables      → [customer_id, authorized_groups, application_id]
+  infrastructure   → [customer_id, authorized_group, qrcode]
+  health-history   → [customerId, authorizedGroup, qrcode]       # NOTE camelCase field names
+  inventory        → [customer_id, authorized_group, facility_id]
+  deviations       → [awb]
+  devices          → [partitionKey]
+  booking          → [id]   ← no composite PK; use query_documents only
+  organizations    → [partitionKey]  ← no composite PK; use query_documents only
 """
 from __future__ import annotations
 
@@ -26,7 +36,23 @@ from mcp.types import TextContent, Tool
 server = Server("trk-cosmos")
 
 
-_CONTAINERS = ["consumables", "infrastructure", "booking", "health", "inventory"]
+# RCA-relevant containers (live PPE ground-truth verified).
+# "health" 404s — the live container is "health-history".
+# "booking" and "organizations" have no hierarchical PK → restrict to query_documents.
+_CONTAINERS = [
+    "consumables",
+    "infrastructure",
+    "health-history",
+    "deviations",
+    "devices",
+    "booking",
+    "organizations",
+    "inventory",
+]
+
+# Containers where point reads (read_document) are not supported because no
+# composite partition key is known from source. Query-only.
+_QUERY_ONLY_CONTAINERS = {"booking", "organizations"}
 
 _FORBIDDEN_KEYWORDS = ("INSERT", "REPLACE", "UPSERT", "DELETE", "MERGE", "EXEC", "EXECUTE")
 
@@ -47,7 +73,9 @@ async def list_tools() -> list[Tool]:
             name="read_document",
             description=(
                 "Read a single Cosmos document by container, partition_key (list of strings, "
-                "in the order Cosmos expects), and document id."
+                "in the order Cosmos expects), and document id. "
+                "NOTE: 'booking' and 'organizations' have no known composite partition key — "
+                "use query_documents for those containers."
             ),
             inputSchema={
                 "type": "object",
@@ -103,6 +131,14 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     container = db.get_container_client(container_name)
 
     if name == "read_document":
+        if container_name in _QUERY_ONLY_CONTAINERS:
+            return [TextContent(
+                type="text",
+                text=(
+                    f"container '{container_name}' has no known composite partition key — "
+                    "use query_documents instead"
+                ),
+            )]
         try:
             doc = container.read_item(item=arguments["id"], partition_key=arguments["partition_key"])
             return [TextContent(type="text", text=json.dumps(doc, default=str, indent=2))]
