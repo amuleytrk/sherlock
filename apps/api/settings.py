@@ -4,7 +4,7 @@ Loaded once at startup from the process environment (which `python-dotenv`
 populates from `.env` if present). All other modules import `get_settings()` —
 NEVER read `os.environ` directly. This is the trust boundary for credentials.
 
-Multi-env: per-environment credentials (MSSQL, Cosmos, Redis, KUBECONFIG, k8s
+Multi-env: per-environment credentials (PostgreSQL, Cosmos, Redis, KUBECONFIG, k8s
 namespace conventions) are looked up dynamically via `env_config(env)` from
 env vars named `<TOOL>_<ENV>_<FIELD>` — adding a new env is just `.env` work.
 """
@@ -21,7 +21,7 @@ from apps.api.env_context import EnvCreds
 
 # pydantic-settings loads `.env` into the Settings model but NOT into
 # os.environ. The per-env config below uses dynamic `os.getenv()` lookups
-# (`MSSQL_<ENV>_*`, etc.), so we explicitly populate os.environ from .env at
+# (`PG_<ENV>_*`, etc.), so we explicitly populate os.environ from .env at
 # import time. `override=False` keeps any value already set in the real env
 # (e.g. CI secrets) authoritative over the file.
 load_dotenv(".env", override=False)
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     datadog_site: str = "datadoghq.com"
 
     # Multi-env config — list of envs this Sherlock instance can talk to.
-    # Adding a new env: append to this list + add MSSQL_<ENV>_*, COSMOS_<ENV>_*,
+    # Adding a new env: append to this list + add PG_<ENV>_*, COSMOS_<ENV>_*,
     # REDIS_<ENV>_*, KUBECONFIG_<ENV>, K8S_<ENV>_NAMESPACE, K8S_<ENV>_POD_SUFFIX.
     sherlock_envs: str = "ppe"
     sherlock_default_env: str = "ppe"
@@ -94,10 +94,6 @@ class Settings(BaseSettings):
 
         return EnvCreds(
             env=e,
-            mssql_server=_get(f"MSSQL_{E}_SERVER"),
-            mssql_database=_get(f"MSSQL_{E}_DATABASE"),
-            mssql_user=_get(f"MSSQL_{E}_USER"),
-            mssql_password=_get(f"MSSQL_{E}_PASSWORD"),
             cosmos_endpoint=_get(f"COSMOS_{E}_ENDPOINT"),
             cosmos_key=_get(f"COSMOS_{E}_KEY"),
             cosmos_database=_get(f"COSMOS_{E}_DATABASE"),
@@ -123,7 +119,6 @@ class Settings(BaseSettings):
         the frontend to grey out un-configured envs/tools."""
         cfg = self.env_config(env)
         return {
-            "mssql": bool(cfg.mssql_server and cfg.mssql_user and cfg.mssql_password),
             "cosmos": bool(cfg.cosmos_endpoint and cfg.cosmos_key),
             "redis": bool(cfg.redis_url or (cfg.redis_host and cfg.redis_key)),
             "kubectl": bool(cfg.kubeconfig and Path(cfg.kubeconfig).is_file()),

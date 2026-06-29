@@ -136,7 +136,7 @@ def classify(message: str) -> RouterResult:
     if intent not in _VALID_INTENTS:
         intent = "CONVERSATIONAL"
     entities = data.get("entities") or {}
-    # Normalize tape_id to uppercase — MSSQL `trk` schema and Cosmos
+    # Normalize tape_id to uppercase — PostgreSQL `trk` schema and Cosmos
     # partition keys are uppercase, so downstream tools can compare without
     # case-folding.
     tid = entities.get("tape_id")

@@ -94,9 +94,9 @@ def hybrid_search(query: str, *, service: str | None = None,
                   system: str | None = None) -> list[dict]:
     """Run hybrid search; returns list of chunk dicts ordered by RRF score.
 
-    `system` filters by the chunk's database-system tag. `mssql` returns chunks
-    tagged 'mssql' OR 'both'; `postgres` returns 'postgres' OR 'both'. None
-    skips the filter entirely (returns everything)."""
+    Post-cutover: pass `system='postgres'` or None. The 'mssql' bucket no longer
+    exists — all chunks are tagged 'postgres' or 'both' (system-agnostic).
+    None skips the filter entirely (returns all rows, recommended)."""
     s = get_settings()
     qvec = _embed(query)
     params = {
@@ -144,16 +144,13 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     if name != "search":
         return [TextContent(type="text", text=f"unknown tool: {name}")]
-    # When called from the RCA agent, the active_system contextvar drives the
-    # filter implicitly so the agent doesn't need to thread it through args.
-    from apps.api.env_context import active_system
     try:
         results = hybrid_search(
             arguments["query"],
             service=arguments.get("service"),
             category=arguments.get("category"),
             top_k=arguments.get("top_k", 20),
-            system=arguments.get("system") or active_system.get() or None,
+            system=arguments.get("system") or None,
         )
         return [TextContent(type="text", text=json.dumps(results, default=str, indent=2))]
     except Exception as e:

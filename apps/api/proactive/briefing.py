@@ -15,7 +15,7 @@ from typing import Iterable
 from anthropic import Anthropic
 
 from apps.api import store
-from apps.api.env_context import active_env, active_system
+from apps.api.env_context import active_env
 from apps.api.proactive.probes import ProbeResult, run_all_probes
 from apps.api.settings import get_settings
 
@@ -139,7 +139,7 @@ async def run_briefing(*, triggered_by: str = "manual") -> dict:
     """Execute one full briefing cycle. Returns the persisted briefing record."""
     s = get_settings()
     env = (active_env.get() or s.sherlock_default_env).lower()
-    system = (active_system.get() or "mssql").lower()
+    system = "postgres"
     cfg = s.env_config(env)
 
     t0 = time.monotonic()

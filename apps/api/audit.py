@@ -13,7 +13,7 @@ from apps.api import store
 _SECRET_PATTERNS: list[tuple[re.Pattern, str]] = [
     # key=value / key: value with optional quotes around either side.
     # Lookbehind `(?<![A-Za-z0-9])` allows underscore/dot/dash/start-of-string
-    # before the keyword, so DATADOG_API_KEY, MSSQL_PPE_PASSWORD,
+    # before the keyword, so DATADOG_API_KEY, PG_PPE_PASSWORD,
     # COSMOS_PPE_KEY, OPENAI_API_KEY, REDIS_PPE_KEY all match.
     (
         re.compile(

@@ -63,8 +63,8 @@ def test_redact_anthropic_api_key_envvar_form():
     assert "sk-ant-this-should-be-redacted-xyz" not in out
 
 
-def test_redact_mssql_password_envvar_form():
-    out = redact("MSSQL_PPE_PASSWORD=hunter2-with-special-$%^chars")
+def test_redact_pg_password_envvar_form():
+    out = redact("PG_PPE_PASSWORD=hunter2-with-special-$%^chars")
     assert "hunter2-with-special-$%^chars" not in out
 
 
@@ -110,11 +110,11 @@ def test_redact_does_not_overmatch_dotted_keyword():
 
 def test_record_and_list_for_rca(tmp_path, monkeypatch):
     _isolate_db(tmp_path, monkeypatch)
-    record(None, "rca_abc", "trk_mssql_query", {"query_type": "device_config", "params": {"tape_id": "AABB"}}, "ok", 42)
+    record(None, "rca_abc", "trk_postgres_query", {"query_type": "device_config", "params": {"device_id": "AABB"}}, "ok", 42)
     record(None, "rca_abc", "trk_kubectl_logs", {"namespace": "trk", "label_selector": "app=ingress"}, "ok", 137)
     entries = list_for_rca("rca_abc")
     assert len(entries) == 2
-    assert entries[0]["tool_name"] == "trk_mssql_query"
+    assert entries[0]["tool_name"] == "trk_postgres_query"
     assert entries[0]["duration_ms"] == 42
 
 

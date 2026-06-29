@@ -21,10 +21,10 @@ CREATE TABLE IF NOT EXISTS vector_store.chunks (
     release           TEXT NOT NULL,
     service           TEXT NOT NULL,
     category          TEXT NOT NULL,
-    -- Trackonomy is migrating MSSQL → PostgreSQL. The corpus has docs and
-    -- code from both eras. `system` lets the UI dropdown filter retrieval
-    -- so e.g. an MSSQL-mode discovery query never surfaces PG-flavored
-    -- table names. Values: 'mssql', 'postgres', 'both' (system-agnostic).
+    -- Post-cutover: corpus is PostgreSQL-only. Values: 'postgres' or 'both'
+    -- (system-agnostic / not DB-specific). Legacy 'mssql' chunks are no longer
+    -- indexed; existing rows should be migrated:
+    --   UPDATE vector_store.chunks SET system='postgres' WHERE system='mssql';
     system            TEXT NOT NULL DEFAULT 'both',
     file_path         TEXT NOT NULL,
     line_start        INTEGER,

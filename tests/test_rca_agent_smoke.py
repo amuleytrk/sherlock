@@ -45,7 +45,7 @@ def test_datadog_tools_hidden_when_keys_missing(monkeypatch):
     assert "trk_datadog_trace" not in names
     # All non-datadog tools still present
     assert "trk_kubectl_logs" in names
-    assert "trk_mssql_query" in names
+    assert "trk_postgres_query" in names
 
 
 def test_datadog_tools_hidden_when_only_one_key_present(monkeypatch):
@@ -94,7 +94,7 @@ def test_run_rca_blocks_when_no_anthropic_key(tmp_path, monkeypatch):
 
     async def collect():
         events = []
-        async for e in run_rca("device AABB events not in lookup_parcels", entities={"tape_id": "AABBCCDDEEFF"}):
+        async for e in run_rca("device AABB events not in device_event", entities={"device_id": "AABBCCDDEEFF"}):
             events.append(e)
         return events
 

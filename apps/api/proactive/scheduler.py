@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from apps.api.env_context import active_env, active_system
+from apps.api.env_context import active_env
 from apps.api.proactive.briefing import run_briefing
 from apps.api.settings import get_settings
 
@@ -27,7 +27,6 @@ class BriefingScheduler:
         # Set context for cron-triggered runs so probes/causes use defaults
         # rather than raising on missing contextvars.
         active_env.set(s.sherlock_default_env.lower())
-        active_system.set("mssql")
 
         if s.sherlock_briefing_on_startup:
             log.info("[sherlock.proactive] running startup briefing")

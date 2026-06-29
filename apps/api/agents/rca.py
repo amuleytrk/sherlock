@@ -43,10 +43,10 @@ def _new_rca_id() -> str:
 # --- MCP tool dispatch table ---
 # Each entry maps the agent's tool name to (module_path, op_name).
 _MCP_DISPATCH: dict[str, tuple[str, str]] = {
-    "sherlock_search":      ("mcp_servers.sherlock_rag.server",  "search"),
-    "trk_mssql_query":      ("mcp_servers.trk_mssql.server",     "query_template"),
-    "trk_mssql_list_types": ("mcp_servers.trk_mssql.server",     "list_query_types"),
-    "trk_cosmos_read":      ("mcp_servers.trk_cosmos.server",    "read_document"),
+    "sherlock_search":        ("mcp_servers.sherlock_rag.server",    "search"),
+    "trk_postgres_query":     ("mcp_servers.trk_postgres.server",  "query_template"),
+    "trk_postgres_list_types":("mcp_servers.trk_postgres.server",  "list_query_types"),
+    "trk_cosmos_read":        ("mcp_servers.trk_cosmos.server",    "read_document"),
     "trk_cosmos_query":     ("mcp_servers.trk_cosmos.server",    "query_documents"),
     "trk_redis_get":        ("mcp_servers.trk_redis.server",     "redis_get"),
     "trk_kubectl_logs":     ("mcp_servers.trk_kubectl.server",   "tail_pod_logs"),
@@ -91,8 +91,17 @@ def _tool_definitions() -> list[dict]:
             },
         },
         {
-            "name": "trk_mssql_query",
-            "description": "Vetted parameterized SELECT over the trk schema in PPE MSSQL. Catalog includes: device_config, location_history, device_events_recent, customer_config, facility_lookup, feature_flags, duplicate_check, raw_events_check, event_delivery_check. Use trk_mssql_list_types to inspect param signatures.",
+            "name": "trk_postgres_query",
+            "description": (
+                "Vetted parameterized SELECT over the trk PostgreSQL schema in the active env. "
+                "Schema: trk (search_path=trk). Catalog (12 query_types): device_config, "
+                "location_history, device_events_recent, raw_events_check, customer_config, "
+                "feature_flags, facility_lookup, duplicate_check, device_health, "
+                "event_delivery_check, account_lookup, application_lookup. "
+                "Tenant filter: account_id (UUID) derived from customer_id + authorized_group. "
+                "status/scan_type are ENUMs — do not compare as integers. "
+                "Use trk_postgres_list_types to inspect param signatures."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -103,8 +112,8 @@ def _tool_definitions() -> list[dict]:
             },
         },
         {
-            "name": "trk_mssql_list_types",
-            "description": "List all available MSSQL query_types and their required parameters.",
+            "name": "trk_postgres_list_types",
+            "description": "List all available PostgreSQL query_types and their required/optional parameter signatures.",
             "input_schema": {"type": "object", "properties": {}},
         },
         {
@@ -136,7 +145,7 @@ def _tool_definitions() -> list[dict]:
         },
         {
             "name": "trk_redis_get",
-            "description": "Read PPE Redis by predefined key_type pattern: idict, pids_to_limes, ble_config, mesh_dedup, dwell_timer.",
+            "description": "Read the active env's Redis by predefined key_type pattern: idict, pids_to_limes, ble_config, mesh_dedup, dwell_timer.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -149,7 +158,7 @@ def _tool_definitions() -> list[dict]:
         },
         {
             "name": "trk_kubectl_logs",
-            "description": "Tail pod logs from PPE AKS by label selector (fans out across replicas). PRIMARY log source — use this before Datadog.",
+            "description": "Tail pod logs from the active env's AKS by label selector (fans out across replicas). PRIMARY log source — use this before Datadog.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -163,7 +172,7 @@ def _tool_definitions() -> list[dict]:
         },
         {
             "name": "trk_kubectl_events",
-            "description": "Kubernetes events in a PPE namespace.",
+            "description": "Kubernetes events in a namespace (active env).",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -394,18 +403,16 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
 
     # Env preamble lives in the user message so the (cached) system prompt
     # stays identical across envs.
-    from apps.api.env_context import active_env, active_system
+    from apps.api.env_context import active_env
     cfg = s.env_config(active_env.get() or s.sherlock_default_env)
-    db_system = active_system.get() or "mssql"
     env_block = (
         "<env>\n"
         f"name: {cfg.env}\n"
         f"k8s_namespace: {cfg.k8s_namespace}\n"
         f"k8s_pod_suffix: {cfg.k8s_pod_suffix}\n"
-        f"db_system: {db_system}  # 'mssql' or 'postgres' — RAG retrieval is "
-        f"already scoped to this; use it to pick the right table names when "
-        f"calling trk_mssql_query / trk_cosmos_query. PG-only tables like "
-        f"trk.raw_device_event are off-limits when db_system=mssql.\n"
+        f"db: postgres  # schema=trk, host trk-mt-ppe-pgsql-eus2.postgres.database.azure.com; "
+        f"tenant filter = account_id (UUID derived from customer_id+authorized_group); "
+        f"use trk_postgres_query for all DB lookups.\n"
         "</env>\n\n"
     )
 

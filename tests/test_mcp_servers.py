@@ -1,4 +1,4 @@
-"""Import + safety smoke tests for all 6 MCP servers.
+"""Import + safety smoke tests for MCP servers.
 
 Live integration tests live in tests/live/ and require real PPE creds; these
 import-only tests verify wiring and read-only enforcement.
@@ -13,7 +13,7 @@ import pytest
 
 SERVER_MODULES = [
     "mcp_servers.trk_kubectl.server",
-    "mcp_servers.trk_mssql.server",
+    "mcp_servers.trk_postgres.server",
     "mcp_servers.trk_cosmos.server",
     "mcp_servers.trk_redis.server",
     "mcp_servers.trk_datadog.server",
@@ -26,20 +26,22 @@ def test_module_imports(modname):
     importlib.import_module(modname)
 
 
-def test_mssql_template_catalog_has_required_queries():
-    from mcp_servers.trk_mssql.templates import QUERY_TEMPLATES
+def test_pg_template_catalog_has_required_queries():
+    from mcp_servers.trk_postgres.templates import CATALOG
     required = {
         "device_config", "location_history", "device_events_recent",
         "customer_config", "facility_lookup", "feature_flags",
         "duplicate_check", "raw_events_check", "event_delivery_check",
+        "device_health", "account_lookup", "application_lookup",
     }
-    assert required.issubset(set(QUERY_TEMPLATES.keys()))
+    assert required.issubset(set(CATALOG.keys()))
 
 
-def test_mssql_templates_specify_required_params():
-    from mcp_servers.trk_mssql.templates import QUERY_TEMPLATES
-    for name, spec in QUERY_TEMPLATES.items():
-        assert "params" in spec and isinstance(spec["params"], list)
+def test_pg_templates_specify_required_params():
+    from mcp_servers.trk_postgres.templates import CATALOG
+    for name, spec in CATALOG.items():
+        assert "required" in spec and isinstance(spec["required"], list)
+        assert "optional" in spec and isinstance(spec["optional"], list)
         assert "sql" in spec and "SELECT" in spec["sql"].upper()
         # No DML keywords leaked into a template
         upper = spec["sql"].upper()
@@ -57,15 +59,15 @@ def test_redis_key_patterns_complete():
 
 
 @pytest.mark.asyncio
-async def test_mssql_unknown_query_type_returns_error():
-    from mcp_servers.trk_mssql.server import call_tool
+async def test_pg_unknown_query_type_returns_error():
+    from mcp_servers.trk_postgres.server import call_tool
     out = await call_tool("query_template", {"query_type": "definitely_not_a_real_query"})
     assert "unknown query_type" in out[0].text
 
 
 @pytest.mark.asyncio
-async def test_mssql_missing_required_params_returns_error():
-    from mcp_servers.trk_mssql.server import call_tool
+async def test_pg_missing_required_params_returns_error():
+    from mcp_servers.trk_postgres.server import call_tool
     out = await call_tool("query_template", {"query_type": "device_config", "params": {}})
     assert "missing required params" in out[0].text
 

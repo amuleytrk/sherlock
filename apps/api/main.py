@@ -35,7 +35,7 @@ from pydantic import BaseModel
 from apps.api import audit, demo, store
 from apps.api.agents.discovery import run_discovery
 from apps.api.agents.rca import run_rca
-from apps.api.env_context import active_env, active_system
+from apps.api.env_context import active_env
 from apps.api.proactive.briefing import run_briefing
 from apps.api.proactive.scheduler import get_scheduler
 from apps.api.trace.runner import run_trace
@@ -95,7 +95,7 @@ def list_envs() -> dict:
 
     The frontend dropdown uses this to render the env list and grey out
     tools that aren't configured for a given env (so the user knows
-    that e.g. switching to Stage means kubectl works but MSSQL doesn't yet)."""
+    that e.g. switching to Stage means kubectl works but PostgreSQL is not yet configured)."""
     s = get_settings()
     return {
         "default": s.sherlock_default_env,
@@ -110,12 +110,6 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     env: str | None = None
-    # 'mssql' | 'postgres' — scopes RAG retrieval to one DB era. None = no
-    # filter (legacy behavior, returns from both buckets).
-    system: str | None = None
-
-
-_VALID_SYSTEMS = {"mssql", "postgres"}
 
 
 async def _dispatch(req: ChatRequest):
@@ -145,7 +139,7 @@ async def _dispatch(req: ChatRequest):
         {
             "text": (
                 "Hi! Ask me about Trackonomy APIs, feature flags, code patterns, "
-                "or describe a bug to investigate (e.g. 'device AABBCCDDEEFF events not in lookup_parcels')."
+                "or describe a bug to investigate (e.g. 'device AABBCCDDEEFF events not in device_event')."
             )
         },
     )
@@ -178,19 +172,11 @@ async def _record_session(req: ChatRequest):
     /rca/{rca_id})."""
     s = get_settings()
     # Resolve and set active env BEFORE anything else — every MCP server reads
-    # active_env.get() to pick the right kubeconfig, MSSQL creds, etc.
+    # active_env.get() to pick the right kubeconfig, PG creds, etc.
     requested_env = (req.env or s.sherlock_default_env).lower()
     if requested_env not in s.configured_envs():
         requested_env = s.sherlock_default_env.lower()
     active_env.set(requested_env)
-
-    # Active DB system filter for RAG retrieval. Defaults to mssql (current
-    # production reality at Trackonomy); flip to postgres via the dropdown
-    # once the migration ships.
-    requested_system = (req.system or "mssql").lower()
-    if requested_system not in _VALID_SYSTEMS:
-        requested_system = "mssql"
-    active_system.set(requested_system)
 
     session_id = req.session_id
     is_new = not session_id
@@ -206,7 +192,7 @@ async def _record_session(req: ChatRequest):
 
     yield sse(
         "session",
-        {"id": session_id, "is_new": is_new, "env": requested_env, "system": requested_system},
+        {"id": session_id, "is_new": is_new, "env": requested_env},
     )
 
     answer_chunks: list[str] = []
@@ -306,7 +292,6 @@ def delete_all_sessions_endpoint():
 
 class BriefingRunRequest(BaseModel):
     env: str | None = None
-    system: str | None = None
 
 
 @app.get("/briefings")
@@ -325,16 +310,12 @@ def get_briefing_endpoint(briefing_id: int):
 
 @app.post("/briefings/run")
 async def run_briefing_endpoint(req: BriefingRunRequest):
-    """Trigger a briefing on demand. Honors the active env/system overrides."""
+    """Trigger a briefing on demand. Honors the active env override."""
     s = get_settings()
     env = (req.env or s.sherlock_default_env).lower()
     if env not in s.configured_envs():
         raise HTTPException(status_code=400, detail=f"unknown env: {env}")
-    system = (req.system or "mssql").lower()
-    if system not in {"mssql", "postgres"}:
-        raise HTTPException(status_code=400, detail=f"unknown system: {system}")
     active_env.set(env)
-    active_system.set(system)
     return await run_briefing(triggered_by="manual")
 
 
@@ -344,7 +325,6 @@ async def run_briefing_endpoint(req: BriefingRunRequest):
 class TraceRequest(BaseModel):
     identifier: str
     env: str | None = None
-    system: str | None = None
     since_seconds: int = 3600
     hint: str | None = None        # 'milestone' | 'device_event' | None (auto-detect)
 
@@ -356,9 +336,7 @@ async def trace_endpoint(req: TraceRequest):
     env = (req.env or s.sherlock_default_env).lower()
     if env not in s.configured_envs():
         raise HTTPException(status_code=400, detail=f"unknown env: {env}")
-    system = (req.system or "mssql").lower()
     active_env.set(env)
-    active_system.set(system)
     cfg = s.env_config(env)
 
     async def stream():
