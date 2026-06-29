@@ -48,11 +48,11 @@ export async function getBriefing(id) {
   return r.json();
 }
 
-export async function runBriefing({ env = null, system = null } = {}) {
+export async function runBriefing({ env = null } = {}) {
   const r = await fetch("/api/briefings/run", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ env, system }),
+    body: JSON.stringify({ env }),
   });
   if (!r.ok) throw new Error(`POST /briefings/run → ${r.status}`);
   return r.json();

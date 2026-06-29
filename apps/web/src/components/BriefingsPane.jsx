@@ -24,7 +24,7 @@ const SEVERITY_LABEL = {
   green: "✅ green",
 };
 
-export default function BriefingsPane({ env, system }) {
+export default function BriefingsPane({ env }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -54,7 +54,7 @@ export default function BriefingsPane({ env, system }) {
     setRunning(true);
     setError(null);
     try {
-      const rec = await runBriefing({ env: env || null, system: system || null });
+      const rec = await runBriefing({ env: env || null });
       const full = await getBriefing(rec.id);
       setSelected(full);
       await refresh(false);
@@ -87,7 +87,7 @@ export default function BriefingsPane({ env, system }) {
             {running ? "Running probes…" : "▶ Run briefing now"}
           </button>
           <div className="text-[10px] font-tech text-ink-muted mt-1.5">
-            env: <span className="text-primary">{env || "?"}</span> · db: <span className="text-primary">{system || "?"}</span>
+            env: <span className="text-primary">{env || "?"}</span>
           </div>
         </div>
         <ul className="flex-1 overflow-y-auto">

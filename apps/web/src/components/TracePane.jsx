@@ -20,7 +20,7 @@ const SUGGESTED_TIME_WINDOWS = [
   { label: "24 hours", seconds: 86400 },
 ];
 
-export default function TracePane({ env, system }) {
+export default function TracePane({ env }) {
   const [identifier, setIdentifier] = useState("");
   const [windowSec, setWindowSec] = useState(3600);
   const [hint, setHint] = useState("");
@@ -62,7 +62,6 @@ export default function TracePane({ env, system }) {
         body: JSON.stringify({
           identifier: identifier.trim(),
           env: env || null,
-          system: system || null,
           since_seconds: windowSec,
           hint: hint || null,
         }),

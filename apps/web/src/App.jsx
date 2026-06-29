@@ -4,7 +4,6 @@ import ChatStream from "./components/ChatStream.jsx";
 import BriefingsPane from "./components/BriefingsPane.jsx";
 import TracePane from "./components/TracePane.jsx";
 import EnvSwitcher from "./components/EnvSwitcher.jsx";
-import SystemSwitcher from "./components/SystemSwitcher.jsx";
 import { getSession } from "./lib/api.js";
 
 export default function App() {
@@ -21,9 +20,6 @@ export default function App() {
   // this from localStorage / backend default; ChatStream sends it on every
   // request so the right kubeconfig + db creds are used.
   const [activeEnv, setActiveEnv] = useState("");
-  // Active DB system filter (mssql / postgres). Scopes RAG retrieval to
-  // the matching corpus subset so PG-only docs don't pollute MSSQL answers.
-  const [activeSystem, setActiveSystem] = useState("");
   // Which top-level surface is shown on the right: chat | briefings | trace.
   // Sidebar stays visible across all modes so chat history is always reachable.
   const [mode, setMode] = useState("chat");
@@ -71,7 +67,6 @@ export default function App() {
         <h1 className="text-[18px] font-semibold tracking-tight">Sherlock</h1>
         <span className="hidden sm:inline label-caps ml-2">RCA + API DISCOVERY</span>
         <div className="ml-auto flex items-center gap-2">
-          <SystemSwitcher value={activeSystem} onChange={setActiveSystem} />
           <EnvSwitcher value={activeEnv} onChange={setActiveEnv} />
         </div>
       </header>
@@ -132,15 +127,14 @@ export default function App() {
                 key={activeSession?.id ?? `new-${newChatNonce}`}
                 session={activeSession}
                 env={activeEnv}
-                system={activeSystem}
                 onTurnComplete={() => setSessionVersion((v) => v + 1)}
               />
             )}
             {mode === "briefings" && (
-              <BriefingsPane env={activeEnv} system={activeSystem} />
+              <BriefingsPane env={activeEnv} />
             )}
             {mode === "trace" && (
-              <TracePane env={activeEnv} system={activeSystem} />
+              <TracePane env={activeEnv} />
             )}
           </div>
         </main>
