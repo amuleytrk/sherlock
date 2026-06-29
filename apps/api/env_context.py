@@ -64,6 +64,17 @@ class EnvCreds:
     k8s_namespace: str = ""
     k8s_pod_suffix: str = ""
 
+    # PostgreSQL (per-env — trk schema, PG 18, Azure Flexible Server)
+    # Enforce read-only at connection time: options="-c default_transaction_read_only=on"
+    # Use PG_<ENV>_* env vars (e.g. PG_PPE_HOST, PG_PPE_DATABASE, ...).
+    pg_host: str = ""
+    pg_port: int = 5432
+    pg_database: str = ""
+    pg_user: str = ""
+    pg_password: str = ""
+    pg_sslmode: str = "require"
+    pg_search_path: str = "trk"
+
 
 # Default is empty so a missing setter is a loud bug — settings.env_config()
 # falls back to `sherlock_default_env` when called without an explicit env.

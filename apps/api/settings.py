@@ -109,6 +109,13 @@ class Settings(BaseSettings):
             kubeconfig=_get(f"KUBECONFIG_{E}"),
             k8s_namespace=_get(f"K8S_{E}_NAMESPACE", e),
             k8s_pod_suffix=_get(f"K8S_{E}_POD_SUFFIX", f"-{e}"),
+            pg_host=_get(f"PG_{E}_HOST"),
+            pg_port=int(_get(f"PG_{E}_PORT", "5432") or "5432"),
+            pg_database=_get(f"PG_{E}_DATABASE"),
+            pg_user=_get(f"PG_{E}_USER"),
+            pg_password=_get(f"PG_{E}_PASSWORD"),
+            pg_sslmode=_get(f"PG_{E}_SSLMODE", "require"),
+            pg_search_path=_get(f"PG_{E}_SEARCH_PATH", "trk"),
         )
 
     def env_availability(self, env: str) -> dict:
@@ -121,6 +128,7 @@ class Settings(BaseSettings):
             "redis": bool(cfg.redis_url or (cfg.redis_host and cfg.redis_key)),
             "kubectl": bool(cfg.kubeconfig and Path(cfg.kubeconfig).is_file()),
             "datadog": bool(self.datadog_api_key and self.datadog_app_key),
+            "postgres": bool(cfg.pg_host and cfg.pg_user and cfg.pg_password),
         }
 
 
