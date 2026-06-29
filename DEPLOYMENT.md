@@ -1,6 +1,6 @@
 # Sherlock — Deployment Plan
 
-> Goal: get Sherlock running as an internal tool reachable from any Trackonomy browser, with **maximum reuse of existing Azure infrastructure** and **minimum new spend**. No code changes are required for this plan — it is a configuration + infrastructure brief.
+> Goal: get Sherlock running as an internal tool reachable from any Trackonomy browser, with **maximum reuse of existing Azure infrastructure** and **minimum new spend**. The v1 path requires no code changes (file-mounted kubeconfigs sourced from Key Vault, plain Postgres connection strings); the v2 hardening (AD-token Postgres auth + runtime kubeconfig fetch via `azure-mgmt-containerservice`) is isolated to `apps/api/settings.py`, `indexer/db.py`, and `mcp_servers/sherlock_rag/server.py` and called out explicitly below.
 
 ---
 
@@ -26,7 +26,9 @@
 
 ## 1. Compute — AKS pod on the existing shared cluster
 
-The shared cluster `aks-trk-mt-v2-shared-eastus2` (in `rg-mt-global-v2-eastus2`) already has node-pool headroom. Sherlock's footprint is small:
+The shared cluster `aks-trk-mt-v2-shared-eastus2` (RG `rg-mt-global-v2-eastus2`, subscription `trk-mt-dev-sub`) already has node-pool headroom. Sherlock's footprint is small:
+
+> **Cross-subscription footprint, not a single tenancy.** The Stage AKS cluster sits in `trk-mt-dev-sub`. The PG Flexible Server it will query lives in `trk-mt-nprd-sub` (Stage PG) or `trk-mt-ppe-sub` (PPE PG). The PPE workloads Sherlock investigates run in `trk-mt-prod-sub`. The UAMI pattern in §3 handles cross-subscription RBAC; private-link or VNet peering to the PG server is required.
 
 - **Resource requests:** 0.5 vCPU / 1 GiB
 - **Limits:** 1 vCPU / 2 GiB
@@ -59,7 +61,7 @@ psql "host=<server>.postgres.database.azure.com user=<admin> dbname=sherlock ssl
   -c "CREATE EXTENSION vector;"
 ```
 
-**3072-dim caveat — already handled.** Azure caps HNSW/IVFFlat indexes at **2,000 dimensions** per column. Sherlock's `text-embedding-3-large` is 3072-dim and the existing schema (`indexer/db.py`) already uses `halfvec(3072)` for HNSW indexing — fp16 storage doubles the indexable ceiling. **No code change needed.** ([MS Learn — pgvector performance limits](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-optimize-performance-pgvector).)
+**3072-dim caveat — already handled.** Azure caps HNSW/IVFFlat indexes at **2,000 dimensions** per column for `vector` (float32). Sherlock's `text-embedding-3-large` is 3072-dim and the existing schema (`indexer/db.py`) already uses `halfvec(3072)` for the HNSW index — fp16 storage raises the per-column dim ceiling to 4,000. The query path in `mcp_servers/sherlock_rag/server.py` casts both sides to `halfvec(3072)` so the index is actually used. **No code change needed.** ([MS Learn — pgvector performance limits](https://learn.microsoft.com/en-us/azure/postgresql/extensions/how-to-optimize-performance-pgvector).)
 
 **Optional upgrade — DiskANN.** Microsoft ships a `pg_diskann` extension on Flexible Server that beats HNSW on speed × recall and supports up to 16,000 dims natively. Worth a one-line benchmark after deployment; if it wins, the halfvec workaround can be dropped. ([pg_diskann docs](https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/how-to-use-pgdiskann).)
 
@@ -153,7 +155,7 @@ You're already on GitHub. **Don't introduce Azure Pipelines.** GitHub Actions is
 
 **Workflow shape** (`.github/workflows/deploy.yml`, to be added later):
 
-1. On push to `main`: lint → run `pytest` (157 tests, ~15s) → build the React bundle → build the multi-stage Docker image (FastAPI + bundled static assets).
+1. On push to `main`: lint → run `pytest` (~15s, ~160 tests) → build the React bundle → build the multi-stage Docker image (FastAPI + bundled static assets).
 2. **Auth to Azure via OIDC federation** to the same UAMI from §3 — `azure/login@v2` action, no stored secrets in GitHub.
 3. `docker push` to ACR.
 4. `kubectl set image deployment/sherlock sherlock=<new-tag> -n sherlock` (or Helm-based rollout).
@@ -185,7 +187,7 @@ spec:
             envFrom: [{ secretRef: { name: sherlock-secrets } }]
 ```
 
-**Why not Azure Functions Timer?** Functions consumption plan does not yet support Python 3.13 (3.11 is current as of April 2026). Skip.
+**Why not Azure Functions Timer?** Functions consumption plan's Python support lags behind the runtime Sherlock targets (currently 3.13). `pyproject.toml` allows 3.12, so an Azure Functions runtime with 3.12 support would work — but AKS CronJob is simpler since the same image + identity already work.
 
 **Why not Logic Apps?** Massive overkill for a Python script.
 

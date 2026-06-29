@@ -63,20 +63,32 @@ Credentials never cross the trust boundary into LLM prompts or LLM API calls. Th
 ```
 sherlock/
 ├── apps/
-│   ├── api/                FastAPI + SSE + agent runners
-│   └── web/                React + Vite + Tailwind
-├── mcp_servers/
-│   ├── trk_mssql/
-│   ├── trk_cosmos/
-│   ├── trk_redis/
-│   ├── trk_kubectl/
-│   ├── trk_datadog/
-│   └── sherlock_rag/
-├── indexer/                corpus indexing CLI
+│   ├── api/
+│   │   ├── agents/         Discovery + RCA agent loops, code_exec, scratch dirs
+│   │   ├── prompts/        canonical system prompts (Markdown)
+│   │   ├── proactive/      scheduled health probes + Haiku-authored briefings
+│   │   ├── trace/          cross-service request trace (pipeline → fetch → stitch → Mermaid)
+│   │   ├── main.py         FastAPI entry + SSE endpoints + lifespan hooks
+│   │   ├── router.py       Haiku-4.5 intent classifier
+│   │   ├── verify.py       Trust layer (claim extraction + Haiku grading)
+│   │   ├── env_context.py  Per-request active env / system contextvars
+│   │   ├── settings.py     Per-env credential lookup (MSSQL_<ENV>_*, etc.)
+│   │   ├── store.py        SQLite — sessions, audit log, briefings, claim evals
+│   │   └── audit.py        Tool-call audit + secret-redaction regex
+│   └── web/                React + Vite + Tailwind (3 modes: Chat / Briefings / Trace)
+├── mcp_servers/            six read-only tool servers
+│   ├── trk_mssql/          parameterized SELECT templates against trk schema
+│   ├── trk_cosmos/         point reads + SELECT-only Cosmos SQL
+│   ├── trk_redis/          GET / HGETALL / EXISTS / ZSCORE via key patterns
+│   ├── trk_kubectl/        read verbs only; env-aware KUBECONFIG injection
+│   ├── trk_datadog/        auto-hidden when credentials absent
+│   └── sherlock_rag/       hybrid pgvector + tsvector retrieval
+├── indexer/                corpus indexing CLI + hybrid-search schema
 ├── scripts/                dev runner, preflight, tunnel, prepare-repos
 ├── tests/                  pytest unit + live + regression suites
 ├── investigations/         per-RCA scratch dirs (gitignored)
 ├── docker-compose.yml      local Postgres for pgvector
+├── DEPLOYMENT.md           Azure-native deployment plan (reuses existing infra)
 ├── pyproject.toml
 └── README.md
 ```
@@ -282,6 +294,13 @@ past investigations. To clean up:
 Why startup-flush instead of shutdown-flush? Shutdown hooks don't run on
 crashes / `kill -9` / OS sleep, so they're inconsistent. Startup-flush
 always runs and produces the same end-user effect.
+
+### Deployment
+
+For shipping Sherlock as an internal Azure-hosted tool — reusing the existing
+AKS cluster, ACR, Postgres Flexible Server, and Workload Identity — see
+[`DEPLOYMENT.md`](./DEPLOYMENT.md). Marginal new infra spend projected at
+under $10/month plus variable AI API costs.
 
 ### Demo mode (no creds required)
 
