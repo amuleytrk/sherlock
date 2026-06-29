@@ -4,12 +4,23 @@ Takes raw kubectl-fetched log chunks per service, walks each line forward,
 and assembles an ordered timeline of events that mention the user's
 identifier or a correlation_id that propagated from earlier services.
 
-Trackonomy services emit JSON-formatted log lines with a `correlation_id`
-field — that's the key. As a request hops services, each service may
-generate a NEW correlation_id but the previous one usually appears in a
-"received" log. We capture every correlation_id that co-occurs with the
-identifier, then expand the matched set on subsequent passes until it
-stabilizes.
+Trackonomy services use ``@trackonomy/custom_logger`` (Winston).  In AKS /
+production the logger runs in ECS mode (``LOG_FORMAT_ECS=true``), emitting
+one JSON object per line.  The stitch key is ``correlation_id`` (top-level
+JSON field in ECS mode; embedded in the requiredFields suffix in plain-text
+mode).  ``_CORRELATION_FIELDS`` covers both spellings seen in the codebase.
+
+Pipeline hop note — ingress-service → location-preprocessor uses an Azure
+Service Bus queue (not a direct Event Grid webhook).  The Service Bus message
+envelopes a ``messageId`` field.  When a line from ingress-service contains
+``messageId``, we track that value in the same correlation set so that
+location-preprocessor's "Received message from Service Bus" log lines are
+automatically stitched in if they echo the same messageId.
+
+Two-pass stitching:
+  Pass 1: collect every line that literally contains ``identifier`` and
+          extract its correlation_ids + EG event IDs + SvcBus messageIds.
+  Pass 2: re-scan, also matching lines whose tracked ID appears in the line.
 """
 from __future__ import annotations
 
@@ -125,9 +136,16 @@ def stitch(identifier: str, services_logs: Iterable[ServiceLogs]) -> StitchedTra
     # Also grab Event Grid IDs that flow between services. They appear as
     # `"id":"<uuid>"` inside `sendToEventGrid :: event grid payload` lines.
     eg_id_pattern = re.compile(r'"id"\s*:\s*"([0-9a-f-]{36})"')
+    # Azure Service Bus messageId — ingress-service embeds this when it
+    # publishes to the Location Prioritization queue; location-preprocessor
+    # echoes it in "Received message from Service Bus, message: ..." lines.
+    svcbus_id_pattern = re.compile(r'"messageId"\s*:\s*"([^"]{8,})"')
     for svc, raw in list(seen_lines):
         if "sendToEventGrid" in raw or "eventType" in raw:
             for m in eg_id_pattern.findall(raw):
+                correlation_set.add(m)
+        if "messageId" in raw or "Service Bus" in raw:
+            for m in svcbus_id_pattern.findall(raw):
                 correlation_set.add(m)
 
     # Pass 2: scan all logs, include any line whose correlation_id is in the

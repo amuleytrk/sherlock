@@ -4,12 +4,19 @@ chunks.
 
 Two-stage:
 1. `extract_claims(markdown)` — regex-based pull of high-precision claim shapes:
-   - HTTP endpoints (METHOD /path)
-   - SQL fully-qualified table or column references (`trk.foo`, `trk.foo.bar`)
-   - Feature flags (`feature_configuration.<flag>`)
+   - HTTP endpoints (METHOD /path), e.g. ``GET /devices/v3/events/latest``
+   - SQL fully-qualified table or column references (``trk.foo``, ``trk.foo.bar``)
+     e.g. ``trk.device_event``, ``trk.device``, ``trk.configuration``
+   - Feature flags (``feature_configuration.<flag>``), e.g.
+     ``feature_configuration.cross_customer_mesh_allowed``
    - Backticked code identifiers that look like function/method names
    These are the categories where hallucinations cause real damage; backticked
-   prose like `customer_id` is intentionally excluded to keep noise low.
+   prose like ``customer_id`` is intentionally excluded to keep noise low.
+
+   Schema note: the PostgreSQL schema is ``trk`` — ``trk.<table>`` references
+   remain the correct fully-qualified form.  The ``_SQL_FQNAME_RE`` regex is
+   schema-generic and matches any ``trk.*`` name regardless of the underlying
+   database engine.
 
 2. `verify_claims(claims, kb_text)` — single Haiku call returning a JSON list
    `[{claim, supported, score, evidence_excerpt}]`. The aggregate score is
@@ -100,7 +107,7 @@ def _verify_with_haiku(claims: list[ExtractedClaim], kb_text: str) -> list[dict]
     sys_prompt = (
         "You verify whether claims in an AI answer are literally supported by "
         "retrieved corpus chunks. Be strict — minor paraphrases that change "
-        "the meaning (e.g. `/devices/v1/history` vs `/devices/v1/configs/get_history`) "
+        "the meaning (e.g. `/devices/v3/history` vs `/devices/v3/configs/get_history`) "
         "are NOT supported.\n\n"
         "Return a JSON array, one object per claim:\n"
         "  {\"text\": str, \"kind\": str, \"supported\": bool, \"score\": int (0-100), "
@@ -110,6 +117,13 @@ def _verify_with_haiku(claims: list[ExtractedClaim], kb_text: str) -> list[dict]
         "  70-89: minor formatting variation but same identity (e.g. case)\n"
         "  40-69: similar shape but different name — likely paraphrase\n"
         "  0-39:  invented or unverified — no chunk supports it\n\n"
+        "Examples of verifiable claim kinds in this system:\n"
+        "  endpoints: GET /devices/v3/events/latest, POST /external/messages, "
+        "GET /devices/v3/configs/history\n"
+        "  sql_table: trk.device_event, trk.device, trk.configuration, "
+        "trk.raw_device_event, trk.account, trk.facility\n"
+        "  feature_flag: feature_configuration.cross_customer_mesh_allowed, "
+        "feature_configuration.location_averaging_enabled\n\n"
         "Output ONLY the JSON array. No prose."
     )
     user_msg = (

@@ -72,7 +72,7 @@ def test_probe_milestone_failures_zero(monkeypatch):
     """No matching log lines → green."""
     def fake(cfg, args, timeout=20):
         if "get" in args and "pods" in args:
-            return 0, "pod/ingress-1\n", ""
+            return 0, "pod/location-preprocessor-1\n", ""
         return 0, "no errors here\nplain log line\n", ""
     _patch_run_kubectl(monkeypatch, fake)
     r = probes.probe_milestone_insert_failures(_cfg())
@@ -80,11 +80,13 @@ def test_probe_milestone_failures_zero(monkeypatch):
 
 
 def test_probe_milestone_failures_red(monkeypatch):
+    """PG-era: 6 'Error inserting lookup parcel entry for tape:' lines from
+    location-preprocessor → red."""
     def fake(cfg, args, timeout=20):
         if "get" in args and "pods" in args:
-            return 0, "pod/ingress-1\n", ""
+            return 0, "pod/location-preprocessor-1\n", ""
         log = "\n".join([
-            'insertMilestoneLookup :: Error inserting milestone lookup :: oops',
+            'ERROR Error inserting lookup parcel entry for tape: TAPE001 with seqno: 42 with error: connection timeout',
         ] * 6)
         return 0, log, ""
     _patch_run_kubectl(monkeypatch, fake)

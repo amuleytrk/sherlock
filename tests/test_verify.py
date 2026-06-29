@@ -30,12 +30,16 @@ def test_extract_endpoint_multiple():
 
 
 def test_extract_sql_table():
-    md = "Insert into `trk.lookup_parcels` and read `trk.tapecfg_db.tape_id`."
+    # PG-era table names: device_event (was lookup_parcels), configuration, device.
+    md = (
+        "Insert into `trk.device_event` and read "
+        "`trk.configuration.application_id`."
+    )
     claims = extract_claims(md)
     sql = [c.text for c in claims if c.kind == "sql_table"]
-    assert "trk.lookup_parcels" in sql
-    # Two-segment names are also captured at length-2.
-    assert any(s.startswith("trk.tapecfg_db") for s in sql)
+    assert "trk.device_event" in sql
+    # Two-segment names are also captured at the two-segment prefix.
+    assert any(s.startswith("trk.configuration") for s in sql)
 
 
 def test_extract_feature_flag():

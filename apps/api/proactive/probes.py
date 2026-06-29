@@ -144,26 +144,53 @@ def _grep_logs_for(
     return matches, samples
 
 
-_INSERT_FAIL = re.compile(r"insertMilestoneLookup :: Error", re.IGNORECASE)
+# PG-era: device_event INSERTs are performed by location-preprocessor.
+# The old MSSQL string "insertMilestoneLookup :: Error" does not exist in PG code.
+# Primary target: location-preprocessor (normal 5264/5258 device_event failures).
+# Secondary target: ingress-service (Brinks milestone failures via insertMilestoneEvent).
+_DEVICE_EVENT_INSERT_FAIL = re.compile(
+    r"Error inserting lookup parcel entry for tape:", re.IGNORECASE
+)
+_MILESTONE_BRINKS_FAIL = re.compile(
+    r"insertMilestoneEvent", re.IGNORECASE
+)
 
 
 def probe_milestone_insert_failures(cfg: EnvCreds) -> ProbeResult:
-    """Failed `lookup_parcels` inserts in ingress-service in the past hour.
-    Yellow at 1+ matches, red at 5+."""
-    label = f"app=ingress-service{cfg.k8s_pod_suffix}"
-    count, samples = _grep_logs_for(cfg, label, _INSERT_FAIL, since_seconds=3600)
+    """device_event INSERT failures in the past hour.
+
+    Primary check: location-preprocessor — this service owns the device_event
+    (lookup_parcels) write in PG for normal 5264/5258 events. Looks for
+    "Error inserting lookup parcel entry for tape:" log lines.
+
+    Secondary check: ingress-service (Brinks milestone path via insertMilestoneEvent).
+
+    Yellow at 1+ total matches, red at 5+.
+    """
+    # Primary: location-preprocessor (normal device_event INSERT failures)
+    loc_label = f"app=location-preprocessor-service{cfg.k8s_pod_suffix}"
+    loc_count, loc_samples = _grep_logs_for(cfg, loc_label, _DEVICE_EVENT_INSERT_FAIL, since_seconds=3600)
+
+    # Secondary: ingress-service (Brinks milestone INSERT failures)
+    ing_label = f"app=ingress-service{cfg.k8s_pod_suffix}"
+    ing_count, ing_samples = _grep_logs_for(cfg, ing_label, _MILESTONE_BRINKS_FAIL, since_seconds=3600)
+
+    count = loc_count + ing_count
+    samples = [f"[location-preprocessor] {l}" for l in loc_samples] + \
+              [f"[ingress-service] {l}" for l in ing_samples]
+
     if count == 0:
         return ProbeResult(
             name="milestone_insert_failures",
-            summary="0 lookup_parcels insert failures in the past hour",
+            summary="0 device_event insert failures in the past hour",
         )
     severity = "red" if count >= 5 else "yellow"
     return ProbeResult(
         name="milestone_insert_failures",
         severity=severity,
         anomaly=True,
-        summary=f"{count} `insertMilestoneLookup :: Error` line(s) in ingress-service in past 1h",
-        evidence=samples,
+        summary=f"{count} device_event insert failure(s) in past 1h (location-preprocessor: {loc_count}, ingress-service: {ing_count})",
+        evidence=samples[:5],
     )
 
 
@@ -171,10 +198,20 @@ _REDIS_SOCKET = re.compile(r"Redis (client: Error|connection.*closed)|Socket clo
 
 
 def probe_redis_socket_errors(cfg: EnvCreds) -> ProbeResult:
-    """Redis socket-closed events across the milestone-pipeline services in
-    the past hour. Some churn is normal; we threshold at 5+ for yellow,
-    20+ for red."""
-    services = ["ingress-service", "external-service", "device-management-service"]
+    """Redis socket-closed events across pipeline services in the past hour.
+
+    Covers the full device_event pipeline: location-preprocessor and
+    event-preprocessor-service (PG-era writers) plus ingress-service,
+    external-service, and device-management-service (milestone path).
+    Some churn is normal; threshold at 5+ for yellow, 20+ for red.
+    """
+    services = [
+        "location-preprocessor-service",   # device_event writer (PG-era primary)
+        "event-preprocessor-service",       # raw_device_event writer
+        "ingress-service",
+        "external-service",
+        "device-management-service",
+    ]
     total = 0
     samples: list[str] = []
     for svc in services:
@@ -188,14 +225,14 @@ def probe_redis_socket_errors(cfg: EnvCreds) -> ProbeResult:
     if total == 0:
         return ProbeResult(
             name="redis_socket_errors",
-            summary="0 Redis socket errors across milestone-pipeline services",
+            summary="0 Redis socket errors across pipeline services",
         )
     severity = "red" if total >= 20 else ("yellow" if total >= 5 else "green")
     return ProbeResult(
         name="redis_socket_errors",
         severity=severity,
         anomaly=severity != "green",
-        summary=f"{total} Redis socket-closed event(s) in past 1h across milestone services",
+        summary=f"{total} Redis socket-closed event(s) in past 1h across pipeline services",
         evidence=samples[:5],
     )
 
