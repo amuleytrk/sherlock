@@ -33,7 +33,6 @@ dependencies = [
     "detect-secrets>=1.5.0",
 
     # Tool layer
-    "pymssql>=2.3.1",
     "azure-cosmos>=4.7.0",
     "redis>=5.2.0",
     "certifi>=2024.7.4",  # CA bundle for Redis TLS on macOS

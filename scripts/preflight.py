@@ -5,11 +5,11 @@ any meaningful API credit. Each check is bounded:
 
 - OpenAI: 1 tiny embedding call (~ $0.0001)
 - Anthropic: 1 tiny Haiku call (~ $0.0005)
-- Per-env (MSSQL / Cosmos / Redis / kubectl): a single read; no writes ever
+- Per-env (PostgreSQL / Cosmos / Redis / kubectl): a single read; no writes ever
 - Datadog: skipped if keys absent (this is OK — Sherlock works without it)
 
 Multi-env: per-env tool checks run once for each env in `SHERLOCK_ENVS`. So if
-`SHERLOCK_ENVS=stage,ppe` you'll see two MSSQL checks, two kubectl checks, etc.
+`SHERLOCK_ENVS=stage,ppe` you'll see two PostgreSQL checks, two kubectl checks, etc.
 
 Usage:
     uv run python -m scripts.preflight
@@ -110,19 +110,17 @@ def check_datadog() -> str:
 # ---- per-env checks (closure over the active env's EnvCreds) ----
 
 
-def _mk_mssql(cfg: EnvCreds):
+def _mk_postgres(cfg: EnvCreds):
     def fn() -> str:
-        if not (cfg.mssql_user and cfg.mssql_password):
-            raise _Skip(f"MSSQL_{cfg.env.upper()}_* not set")
-        import pymssql
-        with pymssql.connect(
-            server=cfg.mssql_server, user=cfg.mssql_user, password=cfg.mssql_password,
-            database=cfg.mssql_database, login_timeout=10, timeout=20, as_dict=True,
-        ) as conn:
+        if not (cfg.pg_host and cfg.pg_user and cfg.pg_password):
+            raise _Skip(f"PG_{cfg.env.upper()}_* not set")
+        import psycopg
+        from mcp_servers.trk_postgres.server import build_connect_kwargs
+        with psycopg.connect(**build_connect_kwargs(cfg)) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT TOP 1 1 AS ok FROM trk.tapecfg_db")
+                cur.execute("SELECT device_id FROM trk.device LIMIT 1")
                 row = cur.fetchone()
-        return f"connected to {cfg.mssql_database} · trk.tapecfg_db readable" if row else "connected but no rows"
+        return f"connected to {cfg.pg_database} (schema trk, read-only) · trk.device readable"
     return fn
 
 
@@ -208,7 +206,7 @@ def main():
         print()
         print(_gray(f"--- env: {env} ---"))
         for name, fn in [
-            (f"MSSQL ({cfg.mssql_database or '?'})", _mk_mssql(cfg)),
+            (f"PostgreSQL ({cfg.pg_database or '?'})", _mk_postgres(cfg)),
             (f"Cosmos ({cfg.cosmos_database or '?'})", _mk_cosmos(cfg)),
             (f"Redis", _mk_redis(cfg)),
             (f"kubectl ({cfg.k8s_namespace or '?'} ns)", _mk_kubectl(cfg)),

@@ -19,8 +19,11 @@ def test_detect_identifier_tape_id():
     assert detect_identifier("aabbccddeeff") == "tape_id"
 
 
-def test_detect_identifier_correlation_uuid():
-    assert detect_identifier("8680093d-b639-4083-bcc9-82068552716c") == "correlation_id"
+def test_detect_identifier_uuid():
+    # A bare UUID is ambiguous in the PG era — it may be a request correlation_id
+    # OR a deterministic account_id/application_id — so it is labelled 'uuid' and
+    # routed to the broad sweep + corpus rather than assumed to be a correlation_id.
+    assert detect_identifier("8680093d-b639-4083-bcc9-82068552716c") == "uuid"
 
 
 def test_detect_identifier_unknown():

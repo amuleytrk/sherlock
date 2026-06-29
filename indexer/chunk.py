@@ -30,8 +30,7 @@ class Chunk:
     content: str
     token_count: int
     parent_id: str | None = None
-    # 'mssql' | 'postgres' | 'both'. Drives the UI's MSSQL/Postgres dropdown
-    # so retrieval can scope to one DB era.
+    # PG-only corpus, column retained, always 'postgres'.
     system: str = "both"
 
 

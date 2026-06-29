@@ -75,25 +75,24 @@ def test_live_anthropic_router():
     if skip:
         pytest.skip(skip)
     from apps.api.router import classify
-    out = classify("Device AABBCCDDEEFF events not in lookup_parcels")
+    out = classify("Device AABBCCDDEEFF events not in device_event")
     assert out.intent == "DEBUGGING"
     assert out.entities.get("tape_id") == "AABBCCDDEEFF"
 
 
 @pytest.mark.live
-def test_live_mssql_smoke():
-    """Smoke-test MSSQL for the default env (typically PPE)."""
-    skip = _missing_env("MSSQL_PPE_USER", "MSSQL_PPE_PASSWORD")
+def test_live_postgres_smoke():
+    """Smoke-test PostgreSQL for the default env (typically PPE)."""
+    skip = _missing_env("PG_PPE_USER", "PG_PPE_PASSWORD")
     if skip:
         pytest.skip(skip)
     from apps.api.env_context import active_env
-    from mcp_servers.trk_mssql.server import _connect
+    from mcp_servers.trk_postgres import server
     active_env.set("ppe")
-    with _connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT TOP 1 1 AS one FROM trk.tapecfg_db")
-            row = cur.fetchone()
-            assert row is not None
+    out = asyncio.run(server.call_tool("list_query_types", {}))
+    assert out and len(out) > 0
+    from mcp.types import TextContent
+    assert isinstance(out[0], TextContent)
 
 
 @pytest.mark.live
