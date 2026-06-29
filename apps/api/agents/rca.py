@@ -305,6 +305,41 @@ def _content_to_history_block(resp_content) -> list[dict]:
     return out
 
 
+def _final_rca_only_tools() -> list[dict]:
+    """Just the write_final_rca tool — used for the synthesis/escalation calls
+    so Opus is forced to produce the report instead of firing another
+    investigative tool when the tool-call budget is already spent."""
+    return [t for t in _tool_definitions() if t["name"] == "write_final_rca"]
+
+
+def _retry_user_message(resp_content, directive: str) -> dict:
+    """Build the user message that follows a synthesis assistant turn on retry.
+
+    The Anthropic API requires every tool_use in an assistant message to be
+    answered by a tool_result in the IMMEDIATELY following message. If the
+    synthesis response contained tool_use block(s) — e.g. an empty
+    write_final_rca, or a stray investigative call — we must return a
+    tool_result for each. A plain-text user message orphans the tool_use and
+    400s the retry call ("tool_use ids were found without tool_result blocks").
+    When the response had no tool_use, a plain-text directive is valid.
+    """
+    tool_uses = [b for b in resp_content if getattr(b, "type", None) == "tool_use"]
+    if not tool_uses:
+        return {"role": "user", "content": directive}
+    return {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": b.id,
+                "content": directive if i == 0
+                else "Disregarded — call write_final_rca with the full markdown.",
+            }
+            for i, b in enumerate(tool_uses)
+        ],
+    }
+
+
 async def _run_subagent(
     client: Anthropic,
     sys_prompt: str,
@@ -585,9 +620,10 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
         try:
             resp = client.messages.create(
                 model="claude-opus-4-7",
-                max_tokens=4000,
+                max_tokens=8000,
                 system=[{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}],
-                tools=_tool_definitions(),
+                tools=_final_rca_only_tools(),
+                tool_choice={"type": "tool", "name": "write_final_rca"},
                 messages=history,
             )
             for b in resp.content:
@@ -613,23 +649,22 @@ async def run_rca(message: str, *, entities: dict | None = None) -> AsyncIterato
                     {"role": "assistant", "content": _content_to_history_block(resp.content)}
                 )
                 history.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "You did NOT successfully call write_final_rca. The required "
-                            "`markdown` argument was missing or empty. Call it ONCE more, "
-                            "right now, with the complete RCA writeup as the `markdown` "
-                            "string — do not respond with any text, only the tool call. "
-                            f"Recent evidence files (in your scratch dir):\n{ev_summary}"
-                        ),
-                    }
+                    _retry_user_message(
+                        resp.content,
+                        "You did NOT successfully call write_final_rca. The required "
+                        "`markdown` argument was missing or empty. Call it ONCE more, "
+                        "right now, with the complete RCA writeup as the `markdown` "
+                        "string. "
+                        f"Recent evidence files (in your scratch dir):\n{ev_summary}",
+                    )
                 )
                 try:
                     retry = client.messages.create(
                         model="claude-opus-4-7",
-                        max_tokens=4000,
+                        max_tokens=8000,
                         system=[{"type": "text", "text": sys_prompt, "cache_control": {"type": "ephemeral"}}],
-                        tools=_tool_definitions(),
+                        tools=_final_rca_only_tools(),
+                        tool_choice={"type": "tool", "name": "write_final_rca"},
                         messages=history,
                     )
                     for b in retry.content:
