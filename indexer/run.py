@@ -50,27 +50,12 @@ def _service_for(path: Path, repos_root: Path) -> str:
 
 
 def _system_for(path: Path) -> str:
-    """Tag a chunk as 'mssql' / 'postgres' / 'both' based on path heuristics.
+    """Hard cutover: the corpus is PostgreSQL-only — every chunk is 'postgres'.
 
-    Trackonomy is mid-migration MSSQL → PostgreSQL. The corpus has docs from
-    both eras; the UI's system dropdown filters retrieval to one of them so
-    e.g. an MSSQL-mode discovery query never surfaces PG-flavored table names.
-
-    Heuristic: explicit postgres-marked paths → 'postgres'. Everything else →
-    'both' (most code and design docs work for either DB era — the read-side
-    differences live in a small set of identifiable files)."""
-    p = str(path).lower()
-    if "/designs/postgres/" in p:
-        return "postgres"
-    name = path.name.lower()
-    if (
-        "postgresql" in name
-        or "postgresdevicemgmt" in name
-        or name.startswith("pgsystem")
-        or name == "datamigrationpg.md"
-    ):
-        return "postgres"
-    return "both"
+    MSSQL has been fully removed and the mid-migration dual-system toggle is
+    gone. Tagging everything 'postgres' keeps the `system` column honest and
+    means a stray 'mssql' filter returns nothing (correct — no MSSQL content)."""
+    return "postgres"
 
 
 def _validate_repos_on_correct_branches(repos_root: Path) -> None:

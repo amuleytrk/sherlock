@@ -45,6 +45,53 @@ EXCLUDE_PATH_PREFIXES: list[Path] = [
     # these creates a recursion loop where the agent searches "how should I
     # do RCA?" and gets back its own design doc.
     Path.home() / "plans" / "work" / "designs" / "rca-tool",
+    # Sherlock's own PG-cutover migration docs (spec/plan/grounding) — meta,
+    # same recursion concern as rca-tool. Platform PG knowledge comes from
+    # pgSystemFlow.md + the n-level docs + the indexed release_2.1 code.
+    Path.home() / "plans" / "work" / "sherlock-pg-repoint",
+    # ── Post-MSSQL-cutover exclusions (PG-only corpus) ───────────────────────
+    # MSSQL-era master design suite (systemFlow.md etc.) — would otherwise be
+    # classified 'architecture' and dominate retrieval with MSSQL table names.
+    Path.home() / "plans" / "work" / "designs" / "platform",
+    # Migration-diff docs: their MSSQL "before" half pollutes a PG-only corpus.
+    Path.home() / "plans" / "work" / "designs" / "postgres" / "postgreSqlMigration.md",
+    Path.home() / "plans" / "work" / "designs" / "postgres" / "dataMigrationPg.md",
+    Path.home() / "plans" / "work" / "designs" / "postgres" / "bleGenericSupportMigration.md",
+    Path.home() / "plans" / "work" / "designs" / "postgres" / "mqttMigration.md",
+    Path.home() / "plans" / "work" / "designs" / "postgres" / "nLevelAccountAuth.md",  # superseded by n-level playbook
+    # MSSQL-era test infra
+    Path.home() / "plans" / "work" / "designs" / "testing-suite",
+    # MSSQL-era api-specs
+    Path.home() / "plans" / "work" / "api-specs" / "assetsByAbcApi.md",
+    Path.home() / "plans" / "work" / "api-specs" / "deviceMgmtReadWriteApis.md",
+    Path.home() / "plans" / "work" / "api-specs" / "deviceMgmtDeleteApis.md",
+    Path.home() / "plans" / "work" / "api-specs" / "proxApi.md",
+    Path.home() / "plans" / "work" / "api-specs" / "bleGenericApis.md",
+    Path.home() / "plans" / "work" / "api-specs" / "mobileSynclogApi.md",
+    Path.home() / "plans" / "work" / "api-specs" / "brinksAuth.md",
+    Path.home() / "plans" / "work" / "api-specs" / "brinksAuthProd.md",
+    Path.home() / "plans" / "work" / "api-specs" / "brinksMilestone.md",
+    Path.home() / "plans" / "work" / "api-specs" / "brinksMilestoneProd.md",
+    # Pre-PG releases
+    Path.home() / "plans" / "work" / "releases" / "release_1.19.md",
+    Path.home() / "plans" / "work" / "releases" / "release_1.20.md",
+    Path.home() / "plans" / "work" / "releases" / "release_2.0.md",
+    # All RCA incident docs — MSSQL incidents; PG/Flink ones out of Sherlock scope
+    Path.home() / "plans" / "work" / "rca",
+    # MSSQL / stale user-docs
+    Path.home() / "plans" / "work" / "user-docs" / "cargoIqOld.md",
+    Path.home() / "plans" / "work" / "user-docs" / "apisToFork2Envs.md",
+    Path.home() / "plans" / "work" / "user-docs" / "longTermLogRetention.md",
+    Path.home() / "plans" / "work" / "user-docs" / "azureBlobStorageMigration.md",
+    Path.home() / "plans" / "work" / "user-docs" / "bleGenericIntegration.md",
+    Path.home() / "plans" / "work" / "user-docs" / "inventoryManufacturingFlow.md",
+    # MSSQL customer-docs
+    Path.home() / "plans" / "work" / "customer-docs" / "brinks.md",
+    Path.home() / "plans" / "work" / "customer-docs" / "brinksFlow.md",
+    Path.home() / "plans" / "work" / "customer-docs" / "brinksSecurityFlow.md",
+    Path.home() / "plans" / "work" / "customer-docs" / "javaTlsCertTrustReport.md",
+    # Internal prompt-engineering reviews — not corpus content
+    Path.home() / "plans" / "work" / "prompt-reviews",
 ]
 
 EXCLUDE_SUFFIXES = {

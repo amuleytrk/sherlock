@@ -58,10 +58,12 @@ def _is_git_repo(path: Path) -> bool:
 def _ensure_source_clone(repo: RepoSpec) -> Path:
     """Return the path to a usable source clone — either the user's existing
     repo, or a sherlock-managed cache clone."""
-    user_clone = USER_REPO_PARENT / repo.name
-    if _is_git_repo(user_clone):
-        print(f"  source: user's working copy at {user_clone}")
-        return user_clone
+    # The user's clones live at ~/Documents/repository/<name>, except a couple
+    # that sit under an `airline-flow/` subfolder. Check both layouts.
+    for user_clone in (USER_REPO_PARENT / repo.name, USER_REPO_PARENT / "airline-flow" / repo.name):
+        if _is_git_repo(user_clone):
+            print(f"  source: user's working copy at {user_clone}")
+            return user_clone
 
     cache_clone = GIT_CACHE_DIR / repo.name
     if _is_git_repo(cache_clone):
