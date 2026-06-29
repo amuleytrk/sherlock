@@ -21,7 +21,7 @@ Plus a third capability: Sherlock **runs proactively** on a schedule and produce
 | Mode | What it does | Primary users |
 |---|---|---|
 | **Discovery** | Hybrid RAG (pgvector + tsvector) + Sonnet 4.6 + Haiku self-verifier. Every answer carries a confidence badge with per-claim evidence. | Engineering / Ops / CS / Product |
-| **RCA + Trace** | Filesystem-as-context agent with read-only MCP tools across MSSQL, Cosmos, Redis, kubectl. Cross-service trace fans out kubectl in parallel and stitches by correlation ID — full Mermaid sequence diagram in seconds. | Engineering / on-call |
+| **RCA + Trace** | Filesystem-as-context agent with read-only MCP tools across PostgreSQL (`trk` schema), Cosmos, Redis, kubectl. Cross-service trace fans out kubectl in parallel and stitches by correlation ID — full Mermaid sequence diagram in seconds. | Engineering / on-call |
 | **Briefings** | Scheduled health probes + Haiku-authored "likely cause + next step" assessments. | Operations / Leadership |
 
 ---
@@ -36,7 +36,9 @@ Plus a third capability: Sherlock **runs proactively** on a schedule and produce
 | LLMs | Claude Haiku 4.5 (router/verifier) → Sonnet 4.6 (worker) → Opus 4.7 (synthesis escalation) |
 | Embeddings | OpenAI `text-embedding-3-large` (3072d) |
 | Vector store | pgvector + tsvector hybrid on local Postgres 16 |
-| Tools | Six read-only MCP servers (mssql, cosmos, redis, kubectl, datadog, rag) |
+| Live data store | Azure PostgreSQL (`trk-mt-ppe-pgsql-eus2`, schema `trk`, subscription `trk-mt-ppe-sub`) |
+| Tools | Five read-only MCP servers (postgres, cosmos, redis, kubectl, rag) |
+| Authorization | `/v3` JWT/Auth0 n-level layer indexed in corpus for Discovery |
 | Visualization | Anthropic Code Execution sandbox (matplotlib) + Mermaid |
 | State | SQLite (`./sherlock.db`) |
 
@@ -65,19 +67,19 @@ sherlock/
 ├── apps/
 │   ├── api/
 │   │   ├── agents/         Discovery + RCA agent loops, code_exec, scratch dirs
-│   │   ├── prompts/        canonical system prompts (Markdown)
+│   │   ├── prompts/        canonical system prompts (Markdown), grounded to PG platform
 │   │   ├── proactive/      scheduled health probes + Haiku-authored briefings
 │   │   ├── trace/          cross-service request trace (pipeline → fetch → stitch → Mermaid)
 │   │   ├── main.py         FastAPI entry + SSE endpoints + lifespan hooks
 │   │   ├── router.py       Haiku-4.5 intent classifier
 │   │   ├── verify.py       Trust layer (claim extraction + Haiku grading)
-│   │   ├── env_context.py  Per-request active env / system contextvars
-│   │   ├── settings.py     Per-env credential lookup (MSSQL_<ENV>_*, etc.)
+│   │   ├── env_context.py  Per-request active env contextvars
+│   │   ├── settings.py     Per-env credential lookup (POSTGRES_<ENV>_*, COSMOS_<ENV>_*, etc.)
 │   │   ├── store.py        SQLite — sessions, audit log, briefings, claim evals
 │   │   └── audit.py        Tool-call audit + secret-redaction regex
 │   └── web/                React + Vite + Tailwind (3 modes: Chat / Briefings / Trace)
-├── mcp_servers/            six read-only tool servers
-│   ├── trk_mssql/          parameterized SELECT templates against trk schema
+├── mcp_servers/            five read-only tool servers
+│   ├── trk_postgres/       12 parameterized SELECT templates, schema trk, read-only enforced
 │   ├── trk_cosmos/         point reads + SELECT-only Cosmos SQL
 │   ├── trk_redis/          GET / HGETALL / EXISTS / ZSCORE via key patterns
 │   ├── trk_kubectl/        read verbs only; env-aware KUBECONFIG injection
@@ -105,11 +107,11 @@ sherlock/
 - Docker Desktop (for local Postgres + pgvector)
 - `kubectl` on PATH
 - API keys: Anthropic, OpenAI
-- Per-env: read access to MSSQL / Cosmos / Redis + a self-contained kubeconfig
+- VPN access to the Trackonomy Azure environment (PG PPE is on a private endpoint)
+- Per-env: PostgreSQL + Cosmos + Redis credentials + a self-contained kubeconfig
   (admin or SP-backed) per env you want to investigate. Sherlock currently
-  ships pre-wired for **PPE** and **Stage**; flip via the dropdown in the
-  top-right of the UI. Adding more envs is just `.env` work — see
-  [Multi-env setup](#multi-env-setup).
+  ships pre-wired for **PG PPE** (`trk-mt-ppe-sub`). Adding more envs (stage,
+  prod) is just `.env` work — see [Multi-env setup](#multi-env-setup).
 
 ### One-time setup
 
@@ -202,29 +204,22 @@ the chat surface:
   Mermaid sequence diagram with errors highlighted, and produces a Haiku
   narrative summary. End-to-end ~5s for a 3-service trace.
 
-### MSSQL vs Postgres mode
+### Corpus and platform
 
-Trackonomy is mid-migration MSSQL → PostgreSQL, and the indexed corpus has
-docs from both eras. The top-right header has a small **MSSQL / Postgres**
-toggle that scopes RAG retrieval to one system, so e.g. an MSSQL-mode
-discovery query never surfaces PG-flavored tables like `trk.raw_device_event`.
-Selection persists to localStorage.
+Sherlock is fully grounded on the **PostgreSQL** platform (data-store 2.0,
+schema `trk`). The corpus (10,269 chunks) is sourced exclusively from
+`release_2.1` repos and the PG/n-level design docs — all tagged `postgres`.
+MSSQL-era documentation is excluded from the index.
 
-How chunks get tagged:
-- Files under design directories matching `postgres/`, plus filenames
-  matching `postgresql*`, `postgresDeviceMgmt*`, `pgSystem*`,
-  `dataMigrationPg.md` → tagged `postgres`.
-- Everything else (general design docs, service code) → tagged `both`.
-
-The filter rule: `mssql` mode returns chunks where `system IN ('mssql', 'both')`;
-`postgres` mode returns `('postgres', 'both')`. So general docs and shared
-service code show up in both modes — only system-era-specific docs are gated.
+Discovery answers questions about the PG schema, the `/v3` JWT/Auth0 n-level
+authorization layer, and the `release_2.1` service codebase with file:line
+citations. There is no MSSQL/Postgres toggle — PostgreSQL is the only system.
 
 ### Multi-env setup
 
 Sherlock can target multiple deployment environments. Switch via the
 dropdown in the top-right of the UI; each chat request carries the active
-env, and every backend tool (MSSQL, Cosmos, Redis, kubectl) reads
+env, and every backend tool (PostgreSQL, Cosmos, Redis, kubectl) reads
 env-specific credentials.
 
 **The kubectl gotcha.** Stage and PPE live on different Azure
@@ -233,43 +228,37 @@ each env uses a **self-contained kubeconfig** (admin cert or service
 principal) — generate once, point `KUBECONFIG_<ENV>` at it, done.
 
 ```bash
-# PPE
+# PPE (subscription trk-mt-ppe-sub)
 az aks get-credentials --admin \
-  --subscription trk-mt-prod-sub \
+  --subscription trk-mt-ppe-sub \
   --resource-group <ppe-rg> --name <ppe-aks> \
   -f ~/.kube/sherlock-ppe.config
 
-# Stage (subscription differs from PPE)
-az aks get-credentials --admin \
-  --subscription trk-mt-dev-sub \
-  --resource-group rg-mt-global-v2-eastus2 \
-  --name aks-trk-mt-v2-shared-eastus2 \
-  -f ~/.kube/sherlock-stage.config
+# Stage — not yet wired (uses a different subscription/AKS cluster)
+# Add when needed: --subscription trk-mt-nprd-sub
 ```
 
 Then in `.env`:
 
 ```bash
-SHERLOCK_ENVS=stage,ppe
+SHERLOCK_ENVS=ppe
 SHERLOCK_DEFAULT_ENV=ppe
 
 KUBECONFIG_PPE=~/.kube/sherlock-ppe.config
-KUBECONFIG_STAGE=~/.kube/sherlock-stage.config
 
 # Per-env DB/cache creds — see .env.example for the full list:
-MSSQL_PPE_*    / MSSQL_STAGE_*
-COSMOS_PPE_*   / COSMOS_STAGE_*
-REDIS_PPE_*    / REDIS_STAGE_*
+PG_PPE_*
+COSMOS_PPE_*
+REDIS_PPE_*
 
 # Trackonomy convention: PPE pods are labeled `app=<svc>-ppe` in namespace
-# `ppe`; stage pods are `-stage` in namespace `stage`. Defaults match these;
-# override with K8S_<ENV>_NAMESPACE / K8S_<ENV>_POD_SUFFIX if needed.
+# `ppe`. Override with K8S_<ENV>_NAMESPACE / K8S_<ENV>_POD_SUFFIX if needed.
 ```
 
-Adding a new env (e.g. **prod**) requires zero code changes:
+Adding a new env (e.g. **stage** or **prod**) requires zero code changes:
 1. Generate a self-contained kubeconfig (admin or SP).
-2. Add `MSSQL_PROD_*`, `COSMOS_PROD_*`, `REDIS_PROD_*`, `KUBECONFIG_PROD`.
-3. Append `prod` to `SHERLOCK_ENVS`.
+2. Add `POSTGRES_<ENV>_*`, `COSMOS_<ENV>_*`, `REDIS_<ENV>_*`, `KUBECONFIG_<ENV>`.
+3. Append the env name to `SHERLOCK_ENVS`.
 4. Restart. The dropdown picks it up.
 
 `uv run python -m scripts.preflight` runs per-env tool checks for every
