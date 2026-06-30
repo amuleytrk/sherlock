@@ -272,6 +272,13 @@ def _tool_definitions() -> list[dict]:
 
     if not datadog_on:
         all_tools = [t for t in all_tools if not t["name"].startswith("trk_datadog_")]
+    # code_exec temporarily disabled: the Anthropic Code Execution + Files API
+    # call passes `container` as a dict and now 400s ("container: Input should
+    # be a valid string"). Removing it from the offered tools means the model
+    # never calls it (no error in the trace); the RCA agent reasons directly
+    # from the DB/corpus evidence, which produces complete RCAs without it.
+    # TODO(post-demo): fix the Files-API/container integration and re-enable.
+    all_tools = [t for t in all_tools if t["name"] != "code_exec"]
     return all_tools
 
 

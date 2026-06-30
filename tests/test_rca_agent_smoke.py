@@ -27,7 +27,10 @@ def test_tool_definitions_complete(monkeypatch):
     names = {t["name"] for t in _tool_definitions()}
     for k in _MCP_DISPATCH:
         assert k in names, f"missing tool definition for MCP tool: {k}"
-    assert "code_exec" in names
+    # code_exec is intentionally NOT offered: the Code Execution + Files API
+    # `container` integration 400s, so it's disabled until fixed (see
+    # _tool_definitions). The agent reasons from DB/corpus evidence instead.
+    assert "code_exec" not in names
     assert "write_final_rca" in names
     assert "Task" in names
 
